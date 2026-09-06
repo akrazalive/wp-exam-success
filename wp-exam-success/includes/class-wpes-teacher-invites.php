@@ -204,21 +204,65 @@ class WPES_Teacher_Invites {
 
 		self::mark_invite( $invite->id, 'accepted' );
 		self::supersede_other_invites( $session->id, $invite->id );
-
-		$class = WPES_Classes::get( $session->class_id );
-		WPES_Emailer::send_session_confirmed_to_attendees( $session, $class, $teacher );
-
-		// Reuse the existing meeting-link send path automatically if a
-		// link is already set — see WPES_Meeting_Links::send_for_session().
-		if ( ! empty( $session->meeting_link ) ) {
-			WPES_Meeting_Links::send_for_session( $session->id, 'initial' );
-		}
+		self::finalize_session_confirmation( $session->id );
 
 		return array(
 			'result'  => 'accepted',
 			'session' => WPES_Sessions::get( $session->id ),
 			'teacher' => $teacher,
 		);
+	}
+
+	/**
+	 * Everything that happens once a session is genuinely confirmed
+	 * (minimum reached + teacher assigned) — shared by the automatic
+	 * Accept-Link path above and the manual admin-assignment path
+	 * (WPES_Admin::ajax_update_session()), so both behave identically:
+	 * confirmation email to attendees, automatic meeting-link send if one
+	 * is already set, and triggering payment capture on every distinct
+	 * order that has a confirmed booking for this session.
+	 *
+	 * Safe to call more than once for the same session — re-sending the
+	 * confirmation email on a repeat call is the only side effect that
+	 * isn't itself idempotent, so callers should only invoke this at the
+	 * moment a session actually transitions into 'confirmed', not on
+	 * every unrelated save.
+	 *
+	 * @param int $session_id
+	 */
+	public static function finalize_session_confirmation( $session_id ) {
+		$session = WPES_Sessions::get( $session_id );
+		if ( ! $session || empty( $session->assigned_teacher_id ) ) {
+			return;
+		}
+
+		$teacher = WPES_Teachers::get( $session->assigned_teacher_id );
+		$class   = WPES_Classes::get( $session->class_id );
+
+		if ( $teacher ) {
+			WPES_Emailer::send_session_confirmed_to_attendees( $session, $class, $teacher );
+		}
+
+		if ( ! empty( $session->meeting_link ) ) {
+			WPES_Meeting_Links::send_for_session( $session->id, 'initial' );
+		}
+
+		// Capture each distinct order that has a confirmed booking for
+		// this session — a session is shared across potentially many
+		// different customers' packages, and each package's payment is
+		// captured independently (Developer Spec §6).
+		if ( class_exists( 'WPES_Payments' ) ) {
+			$bookings = WPES_Bookings::get_attendees_for_session( $session_id, array( 'confirmed' ) );
+			$order_ids = array();
+			foreach ( $bookings as $booking ) {
+				if ( ! empty( $booking->order_id ) ) {
+					$order_ids[ (int) $booking->order_id ] = true;
+				}
+			}
+			foreach ( array_keys( $order_ids ) as $order_id ) {
+				WPES_Payments::maybe_capture_package_payment( $order_id, $session_id );
+			}
+		}
 	}
 
 	protected static function mark_invite( $invite_id, $status ) {
@@ -295,10 +339,15 @@ class WPES_Teacher_Invites {
 	}
 
 	/**
-	 * Cron target: a last safety-net check shortly before each session
-	 * starts, in case something re-opened its eligibility (e.g. a booking
-	 * confirmed after the original triggering event) without a fresh
-	 * invite round being kicked off.
+	 * Cron target: the final check before each session starts (Developer
+	 * Spec §11, Overview PDF's "final time-based check ... default 24
+	 * hours before start"). A still-unconfirmed session this close to
+	 * starting is resolved one of two ways:
+	 *   - enough confirmed attendees, just no teacher yet -> one more
+	 *     invite attempt (safety net for e.g. auto-assignment having been
+	 *     off when the minimum was first reached);
+	 *   - still below the minimum -> the session cannot take place, hand
+	 *     off to WPES_Replacements for the cancellation/credit flow.
 	 */
 	public static function run_final_checks() {
 		$settings = WPES_Admin::get_booking_settings();
@@ -316,7 +365,13 @@ class WPES_Teacher_Invites {
 			if ( ! empty( $session->assigned_teacher_id ) ) {
 				continue;
 			}
-			self::maybe_invite_teachers( $session->id );
+
+			$confirmed = self::count_confirmed_attendees( $session->id );
+			if ( $confirmed >= $settings['min_participants'] ) {
+				self::maybe_invite_teachers( $session->id );
+			} else {
+				WPES_Replacements::process_session_failure( $session );
+			}
 		}
 	}
 }

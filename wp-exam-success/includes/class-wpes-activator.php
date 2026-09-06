@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_Activator {
 
-	const DB_VERSION = '1.6.0';
+	const DB_VERSION = '1.7.0';
 
 	public static function activate() {
 		self::create_tables();
@@ -53,6 +53,7 @@ class WPES_Activator {
 		$teachers_table        = $wpdb->prefix . 'wpes_teachers';
 		$teacher_classes_table = $wpdb->prefix . 'wpes_teacher_classes';
 		$teacher_invites_table = $wpdb->prefix . 'wpes_teacher_invites';
+		$replacement_credits_table = $wpdb->prefix . 'wpes_replacement_credits';
 
 		$sql_classes = "CREATE TABLE {$classes_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -217,6 +218,32 @@ class WPES_Activator {
 			KEY expires_at (expires_at)
 		) {$charset_collate};";
 
+		// One row per session that failed its minimum-participant check —
+		// tracks the customer's entitlement to pick a different session at
+		// no additional charge (Developer Spec §11).
+		$sql_replacement_credits = "CREATE TABLE {$replacement_credits_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			order_id BIGINT UNSIGNED NULL,
+			order_item_id BIGINT UNSIGNED NULL,
+			product_id BIGINT UNSIGNED NULL,
+			source_booking_id BIGINT UNSIGNED NOT NULL,
+			source_session_id BIGINT UNSIGNED NOT NULL,
+			user_id BIGINT UNSIGNED NULL,
+			customer_name VARCHAR(191) NULL,
+			customer_email VARCHAR(191) NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'available',
+			used_booking_id BIGINT UNSIGNED NULL,
+			used_session_id BIGINT UNSIGNED NULL,
+			created_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			PRIMARY KEY  (id),
+			KEY order_id (order_id),
+			KEY user_id (user_id),
+			KEY customer_email (customer_email),
+			KEY status (status),
+			KEY source_session_id (source_session_id)
+		) {$charset_collate};";
+
 		dbDelta( $sql_classes );
 		dbDelta( $sql_sessions );
 		dbDelta( $sql_bookings );
@@ -227,5 +254,6 @@ class WPES_Activator {
 		dbDelta( $sql_teachers );
 		dbDelta( $sql_teacher_classes );
 		dbDelta( $sql_teacher_invites );
+		dbDelta( $sql_replacement_credits );
 	}
 }

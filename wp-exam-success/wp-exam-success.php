@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Exam Success — Course Session Manager
  * Description: Sells course packages via WooCommerce where each package grants a fixed number of sessions, chosen by the customer from recurring, capacity-limited class sessions. Handles session scheduling, capacity locking, timezone-correct display, and meeting-link dispatch.
- * Version: 1.6.0
+ * Version: 1.7.0
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
  * Text Domain: wp-exam-success
@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WPES_VERSION', '1.6.0' );
+define( 'WPES_VERSION', '1.7.0' );
 define( 'WPES_PLUGIN_FILE', __FILE__ );
 define( 'WPES_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPES_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -44,6 +44,7 @@ require_once WPES_PLUGIN_DIR . 'includes/class-wpes-bookings.php';
 require_once WPES_PLUGIN_DIR . 'includes/class-wpes-meeting-links.php';
 require_once WPES_PLUGIN_DIR . 'includes/class-wpes-emailer.php';
 require_once WPES_PLUGIN_DIR . 'includes/class-wpes-teacher-invites.php';
+require_once WPES_PLUGIN_DIR . 'includes/class-wpes-replacements.php';
 require_once WPES_PLUGIN_DIR . 'includes/class-wpes-cron.php';
 require_once WPES_PLUGIN_DIR . 'includes/class-wpes-waitlist.php';
 
@@ -60,6 +61,7 @@ function wpes_bootstrap() {
 		return;
 	}
 
+	require_once WPES_PLUGIN_DIR . 'includes/class-wpes-payments.php';
 	require_once WPES_PLUGIN_DIR . 'includes/class-wpes-woocommerce.php';
 	require_once WPES_PLUGIN_DIR . 'includes/class-wpes-my-account.php';
 	require_once WPES_PLUGIN_DIR . 'includes/class-wpes-magic-login.php';

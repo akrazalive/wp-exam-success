@@ -523,7 +523,22 @@ class WPES_Admin {
 			$fields['source_timezone'] = $tz_name;
 		}
 
+		// Was this save the moment the session actually became newly
+		// assigned? Check before writing so a re-save of an unchanged
+		// assignment doesn't re-fire the confirmation email/payment-
+		// capture side effects.
+		$newly_assigned = false;
+		if ( array_key_exists( 'assigned_teacher_id', $fields ) && $fields['assigned_teacher_id'] ) {
+			$before         = WPES_Sessions::get( $id );
+			$newly_assigned = $before && empty( $before->assigned_teacher_id );
+		}
+
 		WPES_Sessions::update( $id, $fields );
+
+		if ( $newly_assigned ) {
+			WPES_Teacher_Invites::finalize_session_confirmation( $id );
+		}
+
 		wp_send_json_success();
 	}
 

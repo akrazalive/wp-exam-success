@@ -240,6 +240,53 @@ class WPES_Emailer {
 	}
 
 	/**
+	 * Sent to a customer whose booked session was cancelled for not
+	 * reaching the minimum participant count — informs them and points
+	 * at their replacement credit (Developer Spec §11).
+	 *
+	 * @param object $booking Row from wpes_bookings (now cancelled).
+	 * @param object $session Row from wpes_sessions (now cancelled, failed_min).
+	 * @param object|null $class
+	 * @param int $credit_id
+	 * @return bool
+	 */
+	public static function send_session_cancelled_replacement( $booking, $session, $class, $credit_id ) {
+		if ( empty( $booking->customer_email ) ) {
+			return false;
+		}
+
+		$class_name = $class ? $class->name : __( 'your class', 'wp-exam-success' );
+		$title      = $session->title ?: $class_name;
+		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+		$account_url = wc_get_page_permalink( 'myaccount' );
+
+		$body  = '<p>' . sprintf(
+			/* translators: %s: customer name */
+			esc_html__( 'Hi %s,', 'wp-exam-success' ),
+			esc_html( $booking->customer_name ?: __( 'there', 'wp-exam-success' ) )
+		) . '</p>';
+		$body .= '<p>' . sprintf(
+			/* translators: 1: session/class title, 2: date and time */
+			esc_html__( 'Unfortunately your session for %1$s on %2$s did not reach the minimum number of participants and will not take place.', 'wp-exam-success' ),
+			esc_html( $title ),
+			esc_html( $when )
+		) . '</p>';
+		$body .= '<p>' . esc_html__( 'No further action is needed on your part regarding payment — this session is covered by the package you already purchased, and you have not been charged separately for it.', 'wp-exam-success' ) . '</p>';
+		$body .= '<p><strong>' . esc_html__( 'You have 1 replacement credit available.', 'wp-exam-success' ) . '</strong> ' . esc_html__( 'Use it to pick a different session at no additional cost.', 'wp-exam-success' ) . '</p>';
+		$body .= '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $account_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Choose a Replacement Session', 'wp-exam-success' ) . '</a></p>';
+
+		return self::send(
+			$booking->customer_email,
+			sprintf(
+				/* translators: %s: session/class title */
+				__( 'Session cancelled — replacement available for %s', 'wp-exam-success' ),
+				$title
+			),
+			$body
+		);
+	}
+
+	/**
 	 * Admin alert: no teacher accepted a session's Accept-Link within the
 	 * configured validity window.
 	 *

@@ -8,11 +8,14 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_My_Account {
 
+	const REDEEM_NONCE_ACTION = 'wpes_redeem_credit';
+
 	public static function init() {
 		add_filter( 'woocommerce_account_menu_items', array( __CLASS__, 'filter_menu_items' ) );
 		add_action( 'woocommerce_account_dashboard', array( __CLASS__, 'render_dashboard' ), 1 );
 		remove_action( 'woocommerce_account_dashboard', 'woocommerce_account_dashboard_content' );
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
+		add_action( 'admin_post_wpes_redeem_credit', array( __CLASS__, 'handle_redeem_credit' ) );
 	}
 
 	/**
@@ -73,7 +76,46 @@ class WPES_My_Account {
 
 		$base_url = wc_get_page_permalink( 'myaccount' );
 
+		$replacement_credits = WPES_Replacements::get_available_credits( $user->ID, $user->user_email );
+		$available_sessions  = ! empty( $replacement_credits )
+			? WPES_Sessions::query( array( 'status' => 'scheduled', 'only_with_capacity' => true, 'per_page' => 200 ) )
+			: array();
+
 		include WPES_PLUGIN_DIR . 'public/partials/my-account-sessions.php';
+	}
+
+	/**
+	 * Handle the "Choose a Replacement Session" form submit (plain POST
+	 * via admin-post.php, no AJAX/JS required). Redirects back to My
+	 * Sessions with a notice either way.
+	 */
+	public static function handle_redeem_credit() {
+		if ( ! is_user_logged_in() ) {
+			wp_safe_redirect( wc_get_page_permalink( 'myaccount' ) );
+			exit;
+		}
+
+		check_admin_referer( self::REDEEM_NONCE_ACTION, 'wpes_redeem_nonce' );
+
+		$credit_id  = (int) ( $_POST['credit_id'] ?? 0 );
+		$session_id = (int) ( $_POST['session_id'] ?? 0 );
+		$user       = wp_get_current_user();
+		$base_url   = wc_get_page_permalink( 'myaccount' );
+
+		if ( ! $credit_id || ! $session_id ) {
+			wp_safe_redirect( add_query_arg( 'wpes_notice', 'redeem_missing', $base_url ) );
+			exit;
+		}
+
+		$result = WPES_Replacements::redeem_credit( $credit_id, $session_id, $user->ID, $user->user_email );
+
+		if ( is_wp_error( $result ) ) {
+			wp_safe_redirect( add_query_arg( 'wpes_notice', 'redeem_failed', $base_url ) );
+			exit;
+		}
+
+		wp_safe_redirect( add_query_arg( 'wpes_notice', 'redeem_success', $base_url ) );
+		exit;
 	}
 
 	/**

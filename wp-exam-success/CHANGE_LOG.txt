@@ -186,3 +186,131 @@ DEPLOY NOTE (for the live-site migration later):
   gateway- or SMTP-specific, it all goes through the existing
   WPES_Emailer::send() -> wp_mail() path.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-06 17:42 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified)
+  - includes/class-wpes-db.php               (modified)
+  - includes/class-wpes-activator.php        (modified)
+  - includes/class-wpes-payments.php         (NEW)
+  - includes/class-wpes-replacements.php     (NEW)
+  - includes/class-wpes-teacher-invites.php  (modified)
+  - includes/class-wpes-emailer.php          (modified)
+  - includes/class-wpes-my-account.php       (modified)
+  - admin/class-wpes-admin.php               (modified)
+  - public/partials/my-account-sessions.php  (modified)
+
+CHANGE:
+  Package payment capture (§6) plugin-side code, and the full
+  Replacement Session / credit flow (§11) — the two pieces that
+  were flagged as entirely unbuilt in the last progress review.
+
+  Payment (WPES_Payments, new):
+  - maybe_capture_package_payment( $order, $session_id ) — the
+    single trigger point. Deliberately calls no gateway-specific
+    API: it only transitions the WooCommerce order to 'completed'
+    when (and only when) that order is currently 'on-hold' and not
+    already captured. This is not a guess — I pulled the actual
+    installed WooPayments plugin source from staging via FTP and
+    confirmed directly in its code that it binds its own capture
+    logic (capture_authorization_on_order_status_change) to the
+    core `woocommerce_order_status_completed` hook, and that its
+    "Capture charge" admin button is just the standard WooCommerce
+    order-action hook `woocommerce_order_action_capture_charge`.
+    Using the order's own status lifecycle rather than either of
+    those directly keeps this genuinely gateway-agnostic, matching
+    the spec's explicit "no custom payment system" requirement.
+  - IMPORTANT — this code is currently INERT. It guards on the
+    order status being 'on-hold', which never happens until
+    WooPayments' "manual capture" setting is turned on (currently
+    OFF on staging — confirmed via the WooCommerce REST API). That
+    is a gateway-level configuration change, not plugin code, and
+    the developer/AI-assistant paused on making it without the
+    client's explicit go-ahead, consistent with "contact us before
+    changes involving payments." Nothing else in this entry depends
+    on it being on.
+  - Verified while investigating: WooPayments' own settings screen
+    states the authorization must be captured within 7 days or it
+    is automatically cancelled. This is the concrete answer to the
+    spec's own requirement to verify the gateway's supported
+    pre-authorization period — worth the client/dev team confirming
+    packages realistically fill within that window.
+
+  Replacement Session (WPES_Replacements, new):
+  - New table wpes_replacement_credits (one row per credit: source
+    booking/session, customer, status, and where it was redeemed).
+  - process_session_failure( $session ) — called from the existing
+    final-check cron once a session is confirmed to still be below
+    minimum this close to starting: cancels the session, cancels
+    every confirmed booking on it, issues one credit per booking,
+    emails each affected customer.
+  - redeem_credit() — reuses the exact same WPES_Bookings::reserve()
+    + confirm() path a paying customer goes through (so capacity
+    and race-safety come for free), just without a checkout, so no
+    additional charge is ever created.
+  - My Account (My Sessions) now shows any available replacement
+    credit with a session dropdown and a plain-POST "Confirm
+    Replacement Session" button (admin-post.php, nonce-protected,
+    no new JS) — redeeming redirects back with a plain-language
+    success/failure notice.
+  - WPES_Teacher_Invites::run_final_checks() now actually acts on
+    the failure case instead of only ever re-inviting — this closes
+    the gap flagged in the last progress review, where a session
+    that never reached its minimum just sat there indefinitely.
+
+  Also refactored the "session just confirmed" side effects
+  (confirmation email, auto meeting-link send, and now payment
+  capture) out of handle_accept() into a shared
+  finalize_session_confirmation(), and wired the same call into the
+  manual admin-assignment path (WPES_Admin::ajax_update_session) —
+  previously an admin manually assigning a teacher got NONE of
+  those side effects, only the automatic Accept-Link path did.
+  Fixed for consistency; only fires on a genuine new assignment,
+  not on every session re-save.
+
+REASON:
+  Developer Specification §6 (Payment Logic), §7 steps 3/12/13,
+  §11 (Replacement Session), §14 acceptance criteria's payment and
+  replacement bullets, and the Overview PDF's red path (Minimum
+  NOT Reached -> Replacement Session).
+
+VERIFIED:
+  - Every touched/new PHP file passed `php -l`.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte
+    against local — clean on every file.
+  - Triggered the dbDelta upgrade via a live admin page load and a
+    My Account page load; no fatal errors on either.
+  - Full live end-to-end test of the replacement flow on staging:
+    created an isolated test session, enrolled 4 confirmed test
+    attendees (one using my own account so the customer-facing side
+    could be tested for real) — below the minimum of 5. Ran the
+    final-check cron immediately via WP Crontrol + wp-cron.php
+    rather than waiting 12 hours. Confirmed: the session flipped to
+    Cancelled, cancellation/replacement emails were logged going
+    out, my own My Account page showed the credit with a working
+    session picker, and submitting the redemption form created a
+    real new confirmed booking on the chosen replacement session
+    (verified its headcount increased) with the credit then marked
+    used and no longer shown as available. Cleaned up by archiving
+    both test sessions afterward via the same admin action a real
+    user would use.
+  - The payment-capture trigger itself could not be exercised the
+    same way, since it depends on the gateway setting mentioned
+    above, which was intentionally left untouched pending the
+    client's go-ahead.
+  - Known disclosed residue: same category as the earlier Accept-
+    Link test — 5 test bookings (4 original + 1 from the
+    redemption) remain in wp_wpes_bookings, attached to the two
+    now-archived/cancelled test sessions. Harmless, same pre-
+    existing "no unenroll action" gap as before.
+
+OPEN DECISION FOR THE CLIENT:
+  Turn on WooPayments' "manual capture" setting (WooCommerce >
+  Settings > Payments > WooPayments > "Issue an authorization on
+  checkout, and capture later.") to actually activate the payment
+  logic above. Safe to test on staging right now — confirmed via
+  the store's own product list that this WooCommerce install sells
+  only the 3 exam-package products, nothing else that a global
+  gateway-setting change could unintentionally affect.
+------------------------------------------------------------
