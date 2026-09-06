@@ -1,0 +1,111 @@
+.wpes-wrap .wpes-page-title {
+	margin-bottom: 0.5rem;
+}
+
+.wpes-stat-card {
+	transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.wpes-stat-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.wpes-wrap .dataTables_processing {
+	background: rgba(255, 255, 255, 0.9) !important;
+	border: none !important;
+}
+
+.wpes-wrap .dt-buttons {
+	margin-bottom: 0.75rem;
+}
+
+.wpes-wrap .dt-buttons .btn {
+	margin-right: 4px;
+}
+
+.wpes-wrap .is-invalid,
+.wpes-wrap .form-control:invalid {
+	border-color: #dc3545;
+}
+
+.wpes-wrap #wpesSessionModal .wp-editor-wrap {
+	margin-bottom: 0;
+}
+
+.wpes-wrap .wpes-session-check {
+	vertical-align: middle;
+}
+
+.dataTables_wrapper .dt-buttons .btn {
+    color: #fff;
+}
+
+#wpesWaitlistTable td .wpes-waitlist-fields {
+	white-space: normal;
+	word-break: break-word;
+	max-width: 480px;
+}
+
+#wpesWaitlistTable .wpes-waitlist-actions {
+	white-space: nowrap;
+}
+
+#wpesWaitlistTable .wpes-waitlist-actions .btn {
+	margin-right: 4px;
+}
+
+/* Notification status pill */
+.wpes-notified-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.25rem 0.6rem 0.25rem 0.5rem;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1;
+	letter-spacing: 0.01em;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.wpes-notified-pill .wpes-notified-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	display: inline-block;
+	flex-shrink: 0;
+}
+
+.wpes-notified-pill--yes {
+	background-color: #ecfdf5;
+	color: #047857;
+	border-color: #a7f3d0;
+}
+
+.wpes-notified-pill--yes .wpes-notified-dot {
+	background-color: #10b981;
+	box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.wpes-notified-pill--no {
+	background-color: #f8fafc;
+	color: #64748b;
+	border-color: #e2e8f0;
+}
+
+.wpes-notified-pill--no .wpes-notified-dot {
+	background-color: #cbd5e1;
+}
+
+.wpes-notified-on {
+	margin-top: 0.3rem;
+	font-size: 11px;
+	color: #94a3b8;
+	letter-spacing: 0.01em;
+}
+
+#wpesWaitlistTable td .wpes-notified-pill {
+	vertical-align: middle;
+}

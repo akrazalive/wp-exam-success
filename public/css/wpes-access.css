@@ -1,0 +1,58 @@
+.access-my-sessions-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 99999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+}
+
+.access-my-sessions-modal[hidden] {
+	display: none !important;
+}
+
+.access-my-sessions-modal__backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.access-my-sessions-modal__dialog {
+	position: relative;
+	width: 100%;
+	max-width: 420px;
+	background: #fff;
+	border-radius: 8px;
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+	padding: 1.75rem;
+}
+
+.access-my-sessions-modal__close {
+	position: absolute;
+	top: 0.75rem;
+	right: 0.75rem;
+	background: none;
+	border: none;
+	font-size: 1.5rem;
+	cursor: pointer;
+	color: #888;
+	line-height: 1;
+}
+
+.access-my-sessions-modal__message {
+	margin-top: 1rem;
+	font-size: 0.9rem;
+}
+
+.access-my-sessions-modal__message.is-success {
+	color: #257942;
+}
+
+.access-my-sessions-modal__message.is-danger {
+	color: #cc0f35;
+}
+
+.access-my-sessions-modal .button.is-loading {
+	pointer-events: none;
+}
