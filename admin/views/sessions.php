@@ -51,6 +51,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 					<th><?php esc_html_e( 'Starts (site time)', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Capacity', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Meeting Link', 'wp-exam-success' ); ?></th>
+					<th><?php esc_html_e( 'Teacher', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Status', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Actions', 'wp-exam-success' ); ?></th>
 				</tr>
@@ -75,6 +76,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 								<option value="<?php echo esc_attr( $class->id ); ?>"><?php echo esc_html( $class->name ); ?></option>
 							<?php endforeach; ?>
 						</select>
+					</div>
+					<div class="mb-3 wpes-session-teacher-field" style="display:none;">
+						<label class="form-label" for="wpesSessionTeacherId"><?php esc_html_e( 'Assigned Teacher', 'wp-exam-success' ); ?></label>
+						<select class="form-select" name="assigned_teacher_id" id="wpesSessionTeacherId">
+							<option value="0"><?php esc_html_e( 'Unassigned', 'wp-exam-success' ); ?></option>
+						</select>
+						<div class="form-text"><?php esc_html_e( 'Only teachers linked to this class are listed. Automatic invitations happen once the minimum participant count is reached; use this to assign or override manually.', 'wp-exam-success' ); ?></div>
 					</div>
 					<div class="mb-3">
 						<label class="form-label" for="wpesSessionTitle"><?php esc_html_e( 'Title (optional)', 'wp-exam-success' ); ?></label>

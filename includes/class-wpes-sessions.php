@@ -128,7 +128,7 @@ class WPES_Sessions {
 	public static function update( $id, array $fields ) {
 		global $wpdb;
 		$table       = WPES_DB::sessions_table();
-		$allowed     = array( 'title', 'description', 'level', 'starts_at_gmt', 'ends_at_gmt', 'source_timezone', 'max_attendees', 'meeting_link', 'status' );
+		$allowed     = array( 'title', 'description', 'level', 'starts_at_gmt', 'ends_at_gmt', 'source_timezone', 'max_attendees', 'meeting_link', 'status', 'assigned_teacher_id' );
 		$data        = array();
 		$format      = array();
 
@@ -138,15 +138,24 @@ class WPES_Sessions {
 					$data[ $key ] = wp_kses_post( $fields[ $key ] );
 				} elseif ( 'level' === $key ) {
 					$data[ $key ] = sanitize_text_field( $fields[ $key ] );
+				} elseif ( 'assigned_teacher_id' === $key ) {
+					$data[ $key ] = $fields[ $key ] ? (int) $fields[ $key ] : null;
 				} else {
 					$data[ $key ] = $fields[ $key ];
 				}
-				$format[] = in_array( $key, array( 'max_attendees' ), true ) ? '%d' : '%s';
+				$format[] = in_array( $key, array( 'max_attendees', 'assigned_teacher_id' ), true ) ? '%d' : '%s';
 			}
 		}
 		if ( empty( $data ) ) {
 			return false;
 		}
+
+		// Stamp when a teacher assignment actually changes, for the audit trail.
+		if ( array_key_exists( 'assigned_teacher_id', $data ) ) {
+			$data['teacher_assigned_at'] = $data['assigned_teacher_id'] ? WPES_DB::now_gmt() : null;
+			$format[]                    = '%s';
+		}
+
 		$data['updated_at'] = WPES_DB::now_gmt();
 		$format[]            = '%s';
 
@@ -253,6 +262,7 @@ class WPES_Sessions {
 		$sessions_table = WPES_DB::sessions_table();
 		$bookings_table = WPES_DB::bookings_table();
 		$classes_table  = WPES_DB::classes_table();
+		$teachers_table = WPES_DB::teachers_table();
 
 		list( $where_sql, $params ) = self::build_query_where( $args, 's', 'c' );
 
@@ -274,11 +284,12 @@ class WPES_Sessions {
 		$offset   = ( $page - 1 ) * $per_page;
 
 		$sql = "
-			SELECT s.*, c.name AS class_name,
+			SELECT s.*, c.name AS class_name, t.name AS teacher_name,
 				COALESCE(b.booked, 0) AS booked,
 				(s.max_attendees - COALESCE(b.booked, 0)) AS remaining
 			FROM {$sessions_table} s
 			INNER JOIN {$classes_table} c ON c.id = s.class_id
+			LEFT JOIN {$teachers_table} t ON t.id = s.assigned_teacher_id
 			LEFT JOIN (
 				SELECT session_id, COUNT(*) AS booked
 				FROM {$bookings_table}

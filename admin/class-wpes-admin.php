@@ -19,6 +19,11 @@ class WPES_Admin {
 		add_action( 'wp_ajax_wpes_save_class', array( __CLASS__, 'ajax_save_class' ) );
 		add_action( 'wp_ajax_wpes_delete_class', array( __CLASS__, 'ajax_delete_class' ) );
 		add_action( 'wp_ajax_wpes_archive_class', array( __CLASS__, 'ajax_archive_class' ) );
+		add_action( 'wp_ajax_wpes_save_teacher', array( __CLASS__, 'ajax_save_teacher' ) );
+		add_action( 'wp_ajax_wpes_delete_teacher', array( __CLASS__, 'ajax_delete_teacher' ) );
+		add_action( 'wp_ajax_wpes_archive_teacher', array( __CLASS__, 'ajax_archive_teacher' ) );
+		add_action( 'wp_ajax_wpes_datatable_teachers', array( __CLASS__, 'ajax_datatable_teachers' ) );
+		add_action( 'wp_ajax_wpes_get_teachers_for_class', array( __CLASS__, 'ajax_get_teachers_for_class' ) );
 		add_action( 'wp_ajax_wpes_save_session', array( __CLASS__, 'ajax_save_session' ) );
 		add_action( 'wp_ajax_wpes_update_session', array( __CLASS__, 'ajax_update_session' ) );
 		add_action( 'wp_ajax_wpes_cancel_series', array( __CLASS__, 'ajax_cancel_series' ) );
@@ -48,6 +53,7 @@ class WPES_Admin {
 		);
 		add_submenu_page( 'wpes-dashboard', __( 'Dashboard', 'wp-exam-success' ), __( 'Dashboard', 'wp-exam-success' ), self::CAP, 'wpes-dashboard', array( __CLASS__, 'render_dashboard' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Classes', 'wp-exam-success' ), __( 'Classes', 'wp-exam-success' ), self::CAP, 'wpes-classes', array( __CLASS__, 'render_classes' ) );
+		add_submenu_page( 'wpes-dashboard', __( 'Teachers', 'wp-exam-success' ), __( 'Teachers', 'wp-exam-success' ), self::CAP, 'wpes-teachers', array( __CLASS__, 'render_teachers' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Sessions', 'wp-exam-success' ), __( 'Sessions', 'wp-exam-success' ), self::CAP, 'wpes-sessions', array( __CLASS__, 'render_sessions' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Bookings & Reporting', 'wp-exam-success' ), __( 'Bookings & Reporting', 'wp-exam-success' ), self::CAP, 'wpes-bookings', array( __CLASS__, 'render_bookings' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Waitlist', 'wp-exam-success' ), __( 'Waitlist', 'wp-exam-success' ), self::CAP, 'wpes-waitlist', array( __CLASS__, 'render_waitlist' ) );
@@ -105,6 +111,9 @@ class WPES_Admin {
 					'sendMessage'           => __( 'Send message', 'wp-exam-success' ),
 					'confirmDeleteWaitlist' => __( 'Delete this waitlist entry? This cannot be undone.', 'wp-exam-success' ),
 					'deleted'               => __( 'Waitlist entry deleted.', 'wp-exam-success' ),
+					'unassigned'            => __( 'Unassigned', 'wp-exam-success' ),
+					'confirmDeleteTeacher'  => __( 'Delete this teacher? This cannot be undone.', 'wp-exam-success' ),
+					'confirmArchiveTeacher' => __( 'Archive this teacher? They will no longer receive session invitations.', 'wp-exam-success' ),
 				),
 			)
 		);
@@ -123,6 +132,14 @@ class WPES_Admin {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
 		}
 		include WPES_PLUGIN_DIR . 'admin/views/classes.php';
+	}
+
+	public static function render_teachers() {
+		if ( ! current_user_can( self::CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
+		}
+		$classes = WPES_Classes::get_all( 'active' );
+		include WPES_PLUGIN_DIR . 'admin/views/teachers.php';
 	}
 
 	public static function render_sessions() {
@@ -236,6 +253,120 @@ class WPES_Admin {
 		wp_send_json_success();
 	}
 
+	/* ---------------------------------------------------------------
+	 * Teachers
+	 * ------------------------------------------------------------- */
+
+	public static function ajax_save_teacher() {
+		self::verify_request();
+
+		$id        = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
+		$name      = isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '';
+		$email     = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
+		$status    = isset( $_POST['status'] ) ? sanitize_key( $_POST['status'] ) : 'active';
+		$class_ids = isset( $_POST['class_ids'] ) ? array_map( 'intval', (array) $_POST['class_ids'] ) : array();
+
+		if ( '' === $name ) {
+			wp_send_json_error( array( 'message' => __( 'Name is required.', 'wp-exam-success' ) ) );
+		}
+		if ( '' === $email ) {
+			wp_send_json_error( array( 'message' => __( 'Email is required.', 'wp-exam-success' ) ) );
+		}
+
+		if ( $id > 0 ) {
+			$result = WPES_Teachers::update( $id, $name, $email, $status, $class_ids );
+		} else {
+			$result = WPES_Teachers::create( $name, $email, $status, $class_ids );
+			$id     = is_wp_error( $result ) ? 0 : $result;
+		}
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		wp_send_json_success( array( 'id' => $id ) );
+	}
+
+	public static function ajax_delete_teacher() {
+		self::verify_request();
+		$result = WPES_Teachers::delete( (int) ( $_POST['id'] ?? 0 ) );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+		wp_send_json_success();
+	}
+
+	public static function ajax_archive_teacher() {
+		self::verify_request();
+		WPES_Teachers::archive( (int) ( $_POST['id'] ?? 0 ) );
+		wp_send_json_success();
+	}
+
+	/**
+	 * Suitable teachers for a class — used to populate the Session
+	 * modal's Teacher dropdown when the Class selection changes.
+	 */
+	public static function ajax_get_teachers_for_class() {
+		self::verify_request();
+		$class_id = (int) ( $_POST['class_id'] ?? 0 );
+		$teachers = $class_id ? WPES_Teachers::get_teachers_for_class( $class_id ) : array();
+
+		$out = array();
+		foreach ( $teachers as $teacher ) {
+			$out[] = array( 'id' => (int) $teacher->id, 'name' => $teacher->name );
+		}
+		wp_send_json_success( array( 'teachers' => $out ) );
+	}
+
+	public static function ajax_datatable_teachers() {
+		self::verify_request();
+		$draw   = (int) ( $_POST['draw'] ?? 1 );
+		$start  = (int) ( $_POST['start'] ?? 0 );
+		$length = max( 1, (int) ( $_POST['length'] ?? 25 ) );
+		$search = sanitize_text_field( wp_unslash( $_POST['search']['value'] ?? '' ) );
+		$status = sanitize_key( $_POST['status_filter'] ?? '' );
+		$page   = (int) floor( $start / $length ) + 1;
+
+		$args = array(
+			'search'   => $search,
+			'status'   => $status,
+			'per_page' => $length,
+			'page'     => $page,
+		);
+
+		$total    = WPES_Teachers::count_query( $search, $status );
+		$teachers = WPES_Teachers::query( $args );
+		$data     = array();
+
+		foreach ( $teachers as $teacher ) {
+			$class_ids   = WPES_Teachers::get_class_ids_for_teacher( $teacher->id );
+			$class_names = WPES_Teachers::get_class_names_for_teacher( $teacher->id );
+
+			$actions  = '<button type="button" class="btn btn-sm btn-outline-primary wpes-edit-teacher" data-id="' . esc_attr( $teacher->id ) . '" data-name="' . esc_attr( $teacher->name ) . '" data-email="' . esc_attr( $teacher->email ) . '" data-status="' . esc_attr( $teacher->status ) . '" data-class-ids="' . esc_attr( wp_json_encode( $class_ids ) ) . '">' . esc_html__( 'Edit', 'wp-exam-success' ) . '</button> ';
+			if ( 'archived' !== $teacher->status ) {
+				$actions .= '<button type="button" class="btn btn-sm btn-outline-warning wpes-archive-teacher" data-id="' . esc_attr( $teacher->id ) . '">' . esc_html__( 'Archive', 'wp-exam-success' ) . '</button> ';
+			}
+			$actions .= '<button type="button" class="btn btn-sm btn-outline-danger wpes-delete-teacher" data-id="' . esc_attr( $teacher->id ) . '">' . esc_html__( 'Delete', 'wp-exam-success' ) . '</button>';
+
+			$data[] = array(
+				esc_html( $teacher->name ),
+				esc_html( $teacher->email ),
+				esc_html( $class_names ?: '—' ),
+				'<span class="badge bg-' . ( 'active' === $teacher->status ? 'success' : 'secondary' ) . '">' . esc_html( ucfirst( $teacher->status ) ) . '</span>',
+				$actions,
+			);
+		}
+
+		wp_send_json(
+			array(
+				'draw'            => $draw,
+				'recordsTotal'    => $total,
+				'recordsFiltered' => $total,
+				'data'            => $data,
+			)
+		);
+	}
+
 	public static function ajax_save_session() {
 		self::verify_request();
 
@@ -312,6 +443,9 @@ class WPES_Admin {
 		}
 		if ( isset( $_POST['max_attendees'] ) ) {
 			$fields['max_attendees'] = max( 1, (int) $_POST['max_attendees'] );
+		}
+		if ( isset( $_POST['assigned_teacher_id'] ) ) {
+			$fields['assigned_teacher_id'] = (int) $_POST['assigned_teacher_id'];
 		}
 
 		$date    = sanitize_text_field( wp_unslash( $_POST['date'] ?? '' ) );
@@ -518,7 +652,11 @@ class WPES_Admin {
 			$actions .= '<button type="button" class="btn btn-sm btn-outline-primary wpes-send-link" data-id="' . esc_attr( $session->id ) . '" data-type="initial">' . esc_html__( 'Send Link', 'wp-exam-success' ) . '</button> ';
 			$actions .= '<button type="button" class="btn btn-sm btn-outline-primary wpes-send-link" data-id="' . esc_attr( $session->id ) . '" data-type="resend">' . esc_html__( 'Resend', 'wp-exam-success' ) . '</button> ';
 			$actions .= '<button type="button" class="btn btn-sm btn-outline-success wpes-enroll-btn" data-id="' . esc_attr( $session->id ) . '">' . esc_html__( 'Enroll', 'wp-exam-success' ) . '</button> ';
-			$actions .= '<button type="button" class="btn btn-sm btn-outline-primary wpes-edit-session" data-id="' . esc_attr( $session->id ) . '" data-title="' . esc_attr( $session->title ) . '" data-level="' . esc_attr( $session->level ) . '" data-max="' . esc_attr( $session->max_attendees ) . '" data-link="' . esc_url( $session->meeting_link ) . '">' . esc_html__( 'Edit', 'wp-exam-success' ) . '</button>';
+			$actions .= '<button type="button" class="btn btn-sm btn-outline-primary wpes-edit-session" data-id="' . esc_attr( $session->id ) . '" data-title="' . esc_attr( $session->title ) . '" data-level="' . esc_attr( $session->level ) . '" data-max="' . esc_attr( $session->max_attendees ) . '" data-link="' . esc_url( $session->meeting_link ) . '" data-class-id="' . esc_attr( $session->class_id ) . '" data-teacher-id="' . esc_attr( $session->assigned_teacher_id ) . '">' . esc_html__( 'Edit', 'wp-exam-success' ) . '</button>';
+
+			$teacher_html = ! empty( $session->teacher_name )
+				? esc_html( $session->teacher_name )
+				: '<span class="text-muted">' . esc_html__( 'Unassigned', 'wp-exam-success' ) . '</span>';
 
 			$data[] = array(
 				esc_html( $session->class_name ),
@@ -526,6 +664,7 @@ class WPES_Admin {
 				esc_html( $site_time ),
 				'<span class="badge bg-' . ( $full ? 'danger' : 'success' ) . '">' . esc_html( $session->booked . ' / ' . $session->max_attendees ) . '</span>',
 				$link_html,
+				$teacher_html,
 				'<span class="badge bg-' . ( 'scheduled' === $session->status ? 'success' : 'secondary' ) . '">' . esc_html( ucfirst( $session->status ) ) . '</span>',
 				$actions,
 			);

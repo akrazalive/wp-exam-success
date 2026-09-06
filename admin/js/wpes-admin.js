@@ -75,6 +75,33 @@
 			} );
 		}
 
+		/* ---- Teachers DataTable ---- */
+		if ( $( '#wpesTeachersTable' ).length ) {
+			tables.teachers = $( '#wpesTeachersTable' ).DataTable( {
+				processing: true,
+				serverSide: true,
+				ajax: {
+					url: WPES_Admin.ajax_url,
+					type: 'POST',
+					data: function ( d ) {
+						d.action = 'wpes_datatable_teachers';
+						d.nonce = WPES_Admin.nonce;
+						d.status_filter = $( '#wpesTeacherStatusFilter' ).val();
+					}
+				},
+				pageLength: 25,
+				order: [],
+				dom: 'Bfrtip',
+				buttons: dtButtons(),
+				columnDefs: [ { orderable: false, targets: -1 } ],
+				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
+			} );
+
+			$( '#wpesTeacherStatusFilter' ).on( 'change', function () {
+				tables.teachers.ajax.reload();
+			} );
+		}
+
 		/* ---- Sessions DataTable ---- */
 		if ( $( '#wpesSessionsTable' ).length ) {
 			tables.sessions = $( '#wpesSessionsTable' ).DataTable( {
@@ -361,6 +388,98 @@
 			} );
 		} );
 
+		/* ---- Teachers CRUD ---- */
+		$( '#wpesAddTeacherBtn' ).on( 'click', function () {
+			$( '#wpesTeacherForm' )[0].reset();
+			$( '#wpesTeacherId' ).val( 0 );
+			$( '.wpes-teacher-class-check' ).prop( 'checked', false );
+		} );
+
+		$( document ).on( 'click', '.wpes-edit-teacher', function () {
+			var $btn = $( this );
+			$( '#wpesTeacherId' ).val( $btn.data( 'id' ) );
+			$( '#wpesTeacherName' ).val( $btn.data( 'name' ) );
+			$( '#wpesTeacherEmail' ).val( $btn.data( 'email' ) );
+			$( '#wpesTeacherStatus' ).val( $btn.data( 'status' ) );
+
+			var classIds = $btn.data( 'class-ids' ) || [];
+			if ( ! Array.isArray( classIds ) ) {
+				classIds = [];
+			}
+			$( '.wpes-teacher-class-check' ).each( function () {
+				$( this ).prop( 'checked', classIds.indexOf( parseInt( $( this ).val(), 10 ) ) !== -1 );
+			} );
+
+			new bootstrap.Modal( document.getElementById( 'wpesTeacherModal' ) ).show();
+		} );
+
+		$( '#wpesTeacherForm' ).on( 'submit', function ( e ) {
+			e.preventDefault();
+			var data = serializeObject( $( this ) );
+			if ( ! data.name || ! data.email ) {
+				notyf.error( WPES_Admin.i18n.required );
+				return;
+			}
+			post( 'wpes_save_teacher', data ).done( function ( res ) {
+				if ( res.success ) {
+					notyf.success( WPES_Admin.i18n.saved );
+					bootstrap.Modal.getInstance( document.getElementById( 'wpesTeacherModal' ) ).hide();
+					if ( tables.teachers ) tables.teachers.ajax.reload();
+				} else {
+					notyf.error( res.data && res.data.message ? res.data.message : WPES_Admin.i18n.error );
+				}
+			} );
+		} );
+
+		$( document ).on( 'click', '.wpes-archive-teacher', function () {
+			if ( ! confirm( WPES_Admin.i18n.confirmArchiveTeacher ) ) return;
+			post( 'wpes_archive_teacher', { id: $( this ).data( 'id' ) } ).done( function ( res ) {
+				if ( res.success ) {
+					notyf.success( WPES_Admin.i18n.saved );
+					if ( tables.teachers ) tables.teachers.ajax.reload();
+				} else {
+					notyf.error( WPES_Admin.i18n.error );
+				}
+			} );
+		} );
+
+		$( document ).on( 'click', '.wpes-delete-teacher', function () {
+			if ( ! confirm( WPES_Admin.i18n.confirmDeleteTeacher ) ) return;
+			post( 'wpes_delete_teacher', { id: $( this ).data( 'id' ) } ).done( function ( res ) {
+				if ( res.success ) {
+					notyf.success( WPES_Admin.i18n.saved );
+					if ( tables.teachers ) tables.teachers.ajax.reload();
+				} else {
+					notyf.error( res.data && res.data.message ? res.data.message : WPES_Admin.i18n.error );
+				}
+			} );
+		} );
+
+		/* ---- Sessions: assigned-teacher dropdown (only shown while editing) ---- */
+		function loadTeachersForClass( classId, selectedTeacherId ) {
+			var $select = $( '#wpesSessionTeacherId' );
+			$select.prop( 'disabled', true );
+			post( 'wpes_get_teachers_for_class', { class_id: classId } ).done( function ( res ) {
+				$select.empty().append( $( '<option>', { value: 0, text: WPES_Admin.i18n.unassigned } ) );
+				if ( res.success && res.data.teachers ) {
+					$.each( res.data.teachers, function ( i, teacher ) {
+						$select.append( $( '<option>', { value: teacher.id, text: teacher.name } ) );
+					} );
+				}
+				if ( selectedTeacherId ) {
+					$select.val( String( selectedTeacherId ) );
+				}
+			} ).always( function () {
+				$select.prop( 'disabled', false );
+			} );
+		}
+
+		$( '#wpesSessionClassId' ).on( 'change', function () {
+			if ( $( '.wpes-session-teacher-field' ).is( ':visible' ) ) {
+				loadTeachersForClass( $( this ).val(), 0 );
+			}
+		} );
+
 		/* ---- Sessions CRUD ---- */
 		$( '#wpesRepeatSelect' ).on( 'change', function () {
 			$( '#wpesRepeatCountWrap' ).toggle( 'none' !== $( this ).val() );
@@ -374,6 +493,7 @@
 			$( '#wpesSessionSubmitBtn' ).text( 'Create Session(s)' );
 			$( '.wpes-session-recurrence' ).show();
 			$( '.wpes-session-datetime input' ).prop( 'required', true );
+			$( '.wpes-session-teacher-field' ).hide();
 		} );
 
 		$( document ).on( 'click', '.wpes-edit-session', function () {
@@ -389,6 +509,8 @@
 			$( '#wpesSessionSubmitBtn' ).text( 'Update Session' );
 			$( '.wpes-session-recurrence' ).hide();
 			$( '.wpes-session-datetime input' ).prop( 'required', true );
+			$( '.wpes-session-teacher-field' ).show();
+			loadTeachersForClass( $btn.data( 'class-id' ), $btn.data( 'teacher-id' ) );
 			new bootstrap.Modal( document.getElementById( 'wpesSessionModal' ) ).show();
 			post( 'wpes_get_session', { id: id } ).done( function ( res ) {
 				if ( res.success && res.data.session ) {

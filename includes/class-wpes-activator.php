@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_Activator {
 
-	const DB_VERSION = '1.4.0';
+	const DB_VERSION = '1.5.0';
 
 	public static function activate() {
 		self::create_tables();
@@ -44,6 +44,8 @@ class WPES_Activator {
 		$package_classes_table = $wpdb->prefix . 'wpes_package_classes';
 		$magic_tokens_table    = $wpdb->prefix . 'wpes_magic_tokens';
 		$waitlist_table        = $wpdb->prefix . 'wpes_waitlist';
+		$teachers_table        = $wpdb->prefix . 'wpes_teachers';
+		$teacher_classes_table = $wpdb->prefix . 'wpes_teacher_classes';
 
 		$sql_classes = "CREATE TABLE {$classes_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -72,13 +74,16 @@ class WPES_Activator {
 			meeting_link VARCHAR(500) NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
 			recurrence_label VARCHAR(191) NULL,
+			assigned_teacher_id BIGINT UNSIGNED NULL,
+			teacher_assigned_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
 			KEY class_id (class_id),
 			KEY series_id (series_id),
 			KEY starts_at_gmt (starts_at_gmt),
-			KEY status (status)
+			KEY status (status),
+			KEY assigned_teacher_id (assigned_teacher_id)
 		) {$charset_collate};";
 
 		$sql_bookings = "CREATE TABLE {$bookings_table} (
@@ -159,6 +164,30 @@ class WPES_Activator {
 			KEY end_date (end_date)
 		) {$charset_collate};";
 
+		$sql_teachers = "CREATE TABLE {$teachers_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			name VARCHAR(191) NOT NULL,
+			email VARCHAR(191) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY status (status),
+			KEY email (email)
+		) {$charset_collate};";
+
+		// Many-to-many: which classes (subjects) a teacher is suitable to teach.
+		$sql_teacher_classes = "CREATE TABLE {$teacher_classes_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			teacher_id BIGINT UNSIGNED NOT NULL,
+			class_id BIGINT UNSIGNED NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY teacher_class (teacher_id, class_id),
+			KEY teacher_id (teacher_id),
+			KEY class_id (class_id)
+		) {$charset_collate};";
+
 		dbDelta( $sql_classes );
 		dbDelta( $sql_sessions );
 		dbDelta( $sql_bookings );
@@ -166,5 +195,7 @@ class WPES_Activator {
 		dbDelta( $sql_package_classes );
 		dbDelta( $sql_magic_tokens );
 		dbDelta( $sql_waitlist );
+		dbDelta( $sql_teachers );
+		dbDelta( $sql_teacher_classes );
 	}
 }

@@ -39,6 +39,16 @@ class WPES_DB {
 		return $wpdb->prefix . 'wpes_waitlist';
 	}
 
+	public static function teachers_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'wpes_teachers';
+	}
+
+	public static function teacher_classes_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'wpes_teacher_classes';
+	}
+
 	/** Always use this instead of `date()`/`current_time('mysql')` for stored timestamps — everything in the schema is UTC. */
 	public static function now_gmt() {
 		return gmdate( 'Y-m-d H:i:s' );

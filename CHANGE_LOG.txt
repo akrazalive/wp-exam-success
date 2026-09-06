@@ -1,0 +1,86 @@
+WP EXAM SUCCESS — BOOKING WORKFLOW ENHANCEMENT
+Change log for AI-assisted development on this plugin.
+
+Format per entry:
+------------------------------------------------------------
+DATE:      YYYY-MM-DD
+FILE(S):   path/to/file.php (new/modified/deleted)
+CHANGE:    one or two lines on what changed
+REASON:    why it changed (which requirement/spec section, or bug)
+------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-06 15:46 UTC
+FILE(S):
+  - wp-exam-success.php                    (modified)
+  - includes/class-wpes-db.php              (modified)
+  - includes/class-wpes-activator.php       (modified)
+  - includes/class-wpes-teachers.php        (NEW)
+  - includes/class-wpes-sessions.php        (modified)
+  - admin/class-wpes-admin.php              (modified)
+  - admin/views/teachers.php                (NEW)
+  - admin/views/sessions.php                (modified)
+  - admin/js/wpes-admin.js                  (modified)
+
+CHANGE:
+  Added the Teacher data model and a full admin management screen.
+  Specifically:
+  - New DB tables: wpes_teachers (name, email, status) and
+    wpes_teacher_classes (many-to-many: which classes/subjects a
+    teacher is suitable to teach). Bumped DB_VERSION 1.4.0 -> 1.5.0
+    and WPES_VERSION to match (per AGENTS.md schema-change rule).
+  - New columns on wpes_sessions: assigned_teacher_id (nullable FK)
+    and teacher_assigned_at (audit timestamp).
+  - New class WPES_Teachers: CRUD, class-assignment, and
+    get_teachers_for_class() (the lookup future invite logic will
+    use to find "suitable teachers" for a session).
+  - New admin submenu "Teachers" (list, add/edit modal with a
+    class/subject checklist, archive, delete) — mirrors the
+    existing Classes screen's UI pattern exactly.
+  - Sessions admin screen: added a "Teacher" column and an
+    assigned-teacher dropdown in the Edit Session modal (dropdown
+    is populated per-class via a new AJAX endpoint, since only
+    teachers linked to that session's class are valid choices).
+    This is a manual admin control only in this pass — no
+    automatic invite/accept-link workflow yet (that is the next
+    piece of work).
+  - WPES_Sessions::query() (admin listing) now LEFT JOINs the
+    teacher name; WPES_Sessions::update() now accepts
+    assigned_teacher_id as an editable field.
+
+REASON:
+  Developer Specification section 10 ("Teacher Assignment via
+  Email and Accept Link") and the client's direct instruction
+  ("the complete Teacher workflow has not been implemented yet...
+  implement the required Teacher functionality"). This is the
+  foundation everything else in the spec (minimum-participant
+  confirmation, automatic invites, payment capture trigger) will
+  attach to, so it went first. No existing functionality was
+  changed in behavior — only additive: new tables, new columns
+  (nullable, default unassigned), new admin screen, new optional
+  form field. Existing booking/checkout/payment flow untouched.
+
+VERIFIED:
+  - Every touched PHP file passed `php -l`; the JS file passed
+    `node --check`.
+  - Uploaded via FTP to staging, then re-downloaded and diffed
+    byte-for-byte against the local copy to confirm a clean
+    upload.
+  - Hit wp-admin on staging to trigger the dbDelta schema
+    upgrade; no fatal errors on any admin page.
+  - Exercised the full flow live end-to-end via admin-ajax.php:
+    created a test teacher, linked it to a real class, confirmed
+    it listed correctly and resolved as "suitable" for that
+    class, assigned it to a real existing session, confirmed it
+    showed correctly in the Sessions list, then unassigned it and
+    deleted the test teacher — staging is back to a clean state,
+    no test data left behind.
+
+DEPLOY NOTE (for the live-site migration later):
+  Ship all 9 files above together. On first admin page load after
+  deploy, WPES_Admin::init() calls WPES_Activator::maybe_upgrade(),
+  which will detect the DB_VERSION bump and auto-run the schema
+  change (new tables + new nullable columns) — no manual DB step
+  needed. Fully backwards compatible: existing sessions simply
+  start with assigned_teacher_id = NULL ("Unassigned").
+------------------------------------------------------------
