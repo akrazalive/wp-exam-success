@@ -1,0 +1,33 @@
+/**
+Theme Name: Exam Success
+Author: WP Expert Dev
+Author URI: http://wpastra.com/about/
+Description: Custom theme for Exam Succes.
+Version: 1.0.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: exam-success
+Template: astra
+*/
+
+p:last-child{
+	margin-bottom: 0;
+}
+
+.elementor-icon-wrapper{
+	display: flex;
+}
+
+.elementor-icon-list-icon svg{
+	margin: 0 !important;
+}
+
+.elementor-icon-list-text{
+	padding: 0 !important;
+}
+
+/* ==========================================================================
+   EXAM SUCCESS — WooCommerce Styling (Cart / Checkout / My Account)
+   Paste into: Appearance → Customize → Additional CSS
+   Matches homepage: navy #14213D, green #1C7A4B, light gray cards #F6F7F9
+   ========================================================================== */
