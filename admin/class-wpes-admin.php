@@ -172,6 +172,7 @@ class WPES_Admin {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
 		}
 		$filters = self::get_frontend_filters();
+		$booking = self::get_booking_settings();
 		include WPES_PLUGIN_DIR . 'admin/views/settings.php';
 	}
 
@@ -201,13 +202,59 @@ class WPES_Admin {
 
 	public static function ajax_save_settings() {
 		self::verify_request();
-		$keys    = array( 'class_id', 'level', 'day', 'time', 'availability' );
-		$filters = array();
-		foreach ( $keys as $key ) {
-			$filters[ $key ] = ! empty( $_POST['filters'][ $key ] );
+
+		// Two independent forms post to this one action — only touch the
+		// option a given request actually submitted data for, so saving
+		// one never silently wipes the other back to defaults.
+		if ( isset( $_POST['filters'] ) ) {
+			$keys    = array( 'class_id', 'level', 'day', 'time', 'availability' );
+			$filters = array();
+			foreach ( $keys as $key ) {
+				$filters[ $key ] = ! empty( $_POST['filters'][ $key ] );
+			}
+			update_option( 'wpes_frontend_filters', $filters, false );
 		}
-		update_option( 'wpes_frontend_filters', $filters, false );
+
+		if ( isset( $_POST['booking'] ) ) {
+			$posted  = (array) $_POST['booking'];
+			$booking = array(
+				'min_participants'          => max( 1, (int) ( $posted['min_participants'] ?? 5 ) ),
+				'auto_teacher_assignment'   => ! empty( $posted['auto_teacher_assignment'] ),
+				'teacher_invite_hours'      => max( 1, (int) ( $posted['teacher_invite_hours'] ?? 4 ) ),
+				'final_check_hours_before'  => max( 1, (int) ( $posted['final_check_hours_before'] ?? 24 ) ),
+			);
+			update_option( 'wpes_booking_settings', $booking, false );
+		}
+
 		wp_send_json_success();
+	}
+
+	/**
+	 * Global booking-workflow settings (minimum participants, teacher
+	 * assignment). Missing keys default per the Developer Specification.
+	 *
+	 * @return array{min_participants:int,auto_teacher_assignment:bool,teacher_invite_hours:int,final_check_hours_before:int}
+	 */
+	public static function get_booking_settings() {
+		$defaults = array(
+			'min_participants'         => 5,
+			'auto_teacher_assignment'  => true,
+			'teacher_invite_hours'     => 4,
+			'final_check_hours_before' => 24,
+		);
+		$saved = get_option( 'wpes_booking_settings', array() );
+		if ( ! is_array( $saved ) ) {
+			$saved = array();
+		}
+		$out = array();
+		foreach ( $defaults as $key => $default ) {
+			$out[ $key ] = array_key_exists( $key, $saved ) ? $saved[ $key ] : $default;
+		}
+		$out['min_participants']         = max( 1, (int) $out['min_participants'] );
+		$out['auto_teacher_assignment']  = (bool) $out['auto_teacher_assignment'];
+		$out['teacher_invite_hours']     = max( 1, (int) $out['teacher_invite_hours'] );
+		$out['final_check_hours_before'] = max( 1, (int) $out['final_check_hours_before'] );
+		return $out;
 	}
 
 	private static function verify_request() {
@@ -506,6 +553,12 @@ class WPES_Admin {
 		if ( is_wp_error( $result ) ) {
 			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
 		}
+
+		// manual_enroll() confirms the booking immediately (no order to
+		// wait on) — it can push the session past its minimum the same
+		// way a paid booking does, so re-check here too.
+		WPES_Teacher_Invites::maybe_invite_teachers( $session_id );
+
 		wp_send_json_success( array( 'booking_id' => $result ) );
 	}
 

@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_Activator {
 
-	const DB_VERSION = '1.5.0';
+	const DB_VERSION = '1.6.0';
 
 	public static function activate() {
 		self::create_tables();
@@ -19,6 +19,12 @@ class WPES_Activator {
 		}
 		if ( ! wp_next_scheduled( 'wpes_waitlist_match_sessions' ) ) {
 			wp_schedule_event( time(), 'wpes_twelve_hours', 'wpes_waitlist_match_sessions' );
+		}
+		if ( ! wp_next_scheduled( 'wpes_teacher_invite_sweep' ) ) {
+			wp_schedule_event( time(), 'wpes_five_minutes', 'wpes_teacher_invite_sweep' );
+		}
+		if ( ! wp_next_scheduled( 'wpes_session_final_check' ) ) {
+			wp_schedule_event( time(), 'wpes_twelve_hours', 'wpes_session_final_check' );
 		}
 	}
 
@@ -46,6 +52,7 @@ class WPES_Activator {
 		$waitlist_table        = $wpdb->prefix . 'wpes_waitlist';
 		$teachers_table        = $wpdb->prefix . 'wpes_teachers';
 		$teacher_classes_table = $wpdb->prefix . 'wpes_teacher_classes';
+		$teacher_invites_table = $wpdb->prefix . 'wpes_teacher_invites';
 
 		$sql_classes = "CREATE TABLE {$classes_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -76,6 +83,7 @@ class WPES_Activator {
 			recurrence_label VARCHAR(191) NULL,
 			assigned_teacher_id BIGINT UNSIGNED NULL,
 			teacher_assigned_at DATETIME NULL,
+			confirmation_state VARCHAR(20) NOT NULL DEFAULT 'pending',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
@@ -83,7 +91,8 @@ class WPES_Activator {
 			KEY series_id (series_id),
 			KEY starts_at_gmt (starts_at_gmt),
 			KEY status (status),
-			KEY assigned_teacher_id (assigned_teacher_id)
+			KEY assigned_teacher_id (assigned_teacher_id),
+			KEY confirmation_state (confirmation_state)
 		) {$charset_collate};";
 
 		$sql_bookings = "CREATE TABLE {$bookings_table} (
@@ -188,6 +197,26 @@ class WPES_Activator {
 			KEY class_id (class_id)
 		) {$charset_collate};";
 
+		// One row per teacher invited to a session via Accept-Link. A session
+		// can have several pending rows at once (one per invited teacher);
+		// the first to accept wins and the rest are marked 'superseded'.
+		$sql_teacher_invites = "CREATE TABLE {$teacher_invites_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			session_id BIGINT UNSIGNED NOT NULL,
+			teacher_id BIGINT UNSIGNED NOT NULL,
+			token_hash VARCHAR(64) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			expires_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL,
+			responded_at DATETIME NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY token_hash (token_hash),
+			KEY session_id (session_id),
+			KEY teacher_id (teacher_id),
+			KEY status (status),
+			KEY expires_at (expires_at)
+		) {$charset_collate};";
+
 		dbDelta( $sql_classes );
 		dbDelta( $sql_sessions );
 		dbDelta( $sql_bookings );
@@ -197,5 +226,6 @@ class WPES_Activator {
 		dbDelta( $sql_waitlist );
 		dbDelta( $sql_teachers );
 		dbDelta( $sql_teacher_classes );
+		dbDelta( $sql_teacher_invites );
 	}
 }

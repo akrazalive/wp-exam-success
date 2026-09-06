@@ -150,9 +150,14 @@ class WPES_Sessions {
 			return false;
 		}
 
-		// Stamp when a teacher assignment actually changes, for the audit trail.
+		// Stamp when a teacher assignment actually changes, for the audit
+		// trail, and keep confirmation_state consistent with whichever
+		// path assigned it (manual admin edit here, or the automatic
+		// Accept-Link acceptance in WPES_Teacher_Invites::handle_accept()).
 		if ( array_key_exists( 'assigned_teacher_id', $data ) ) {
 			$data['teacher_assigned_at'] = $data['assigned_teacher_id'] ? WPES_DB::now_gmt() : null;
+			$data['confirmation_state']  = $data['assigned_teacher_id'] ? 'confirmed' : 'pending';
+			$format[]                    = '%s';
 			$format[]                    = '%s';
 		}
 

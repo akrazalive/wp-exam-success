@@ -668,5 +668,21 @@
 			} );
 		} );
 
+		$( '#wpesBookingSettingsForm' ).on( 'submit', function ( e ) {
+			e.preventDefault();
+			var data = serializeObject( $( this ) );
+			var $btn = $( '#wpesBookingSettingsSaveBtn' );
+			$btn.prop( 'disabled', true );
+			post( 'wpes_save_settings', data ).done( function ( res ) {
+				if ( res.success ) {
+					notyf.success( WPES_Admin.i18n.saved );
+				} else {
+					notyf.error( res.data && res.data.message ? res.data.message : WPES_Admin.i18n.error );
+				}
+			} ).always( function () {
+				$btn.prop( 'disabled', false );
+			} );
+		} );
+
 	} );
 } )( jQuery );

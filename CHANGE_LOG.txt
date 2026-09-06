@@ -84,3 +84,105 @@ DEPLOY NOTE (for the live-site migration later):
   needed. Fully backwards compatible: existing sessions simply
   start with assigned_teacher_id = NULL ("Unassigned").
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-06 16:39 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified)
+  - includes/class-wpes-db.php               (modified)
+  - includes/class-wpes-activator.php        (modified)
+  - includes/class-wpes-teacher-invites.php  (NEW)
+  - includes/class-wpes-emailer.php          (modified)
+  - includes/class-wpes-woocommerce.php      (modified)
+  - includes/class-wpes-sessions.php         (modified)
+  - includes/class-wpes-cron.php             (modified)
+  - admin/class-wpes-admin.php               (modified)
+  - admin/views/settings.php                 (modified)
+  - admin/js/wpes-admin.js                   (modified)
+  - public/class-wpes-public.php             (modified)
+
+CHANGE:
+  Automatic teacher invitation via Accept-Link, and minimum-
+  participant tracking, wired on top of last session's manual
+  Teacher admin screen. Specifically:
+  - New DB_VERSION 1.5.0 -> 1.6.0: new table wpes_teacher_invites
+    (one row per teacher invited to a session; status pending /
+    accepted / expired / superseded); new column
+    wpes_sessions.confirmation_state (pending / confirmed),
+    tracking whether a session has actually locked in (minimum
+    reached + teacher assigned), independent of payment status.
+  - New class WPES_Teacher_Invites: maybe_invite_teachers()
+    (re-checks a session's confirmed headcount against the
+    min-participants setting and, if reached with no teacher yet
+    and no invite round already in flight, emails every suitable
+    teacher a unique Accept-Link); handle_accept() (validates the
+    token, then claims the session with a single conditional
+    UPDATE ... WHERE assigned_teacher_id IS NULL — the same
+    race-condition-safe discipline as WPES_Bookings::reserve(),
+    just via a compare-and-set instead of a row lock, since there
+    is only one column to arbitrate); sweep_expired_invites()
+    (expires stale invites, emails the admin if a session's whole
+    invite round lapsed with nobody assigned); run_final_checks()
+    (safety-net re-check on sessions nearing their start time).
+  - New public endpoint: ?wpes_teacher_accept=<token> (no login
+    required, same pattern as the existing customer magic-login
+    link) — shows Accepted / Already Assigned / Expired.
+  - Global Settings: added Minimum Participants (default 5),
+    Automatic Teacher Assignment (on/off), Teacher Invitation
+    Validity (default 4h), Final Check Before Session (default
+    24h) to the existing Settings screen — no new settings page.
+  - Wired the trigger into WPES_WooCommerce::confirm_bookings_
+    for_order() (fires after each paid booking confirms) AND into
+    WPES_Admin::ajax_manual_enroll() (the existing manual-
+    enrollment admin action was confirming bookings directly
+    without ever re-checking the minimum — fixed so both paths
+    behave consistently).
+  - 3 new emails via WPES_Emailer: send_teacher_invite(),
+    send_session_confirmed_to_attendees() (distinct from the
+    original order-confirmation email, since a session can lock
+    in well after purchase), send_admin_no_teacher_response().
+  - Reused the two existing cron schedules (five-minute /
+    twelve-hour) for the new sweep and final-check jobs rather
+    than adding new intervals.
+
+REASON:
+  Developer Specification sections 7-11 (required booking
+  workflow steps 8-10 and 14; minimum participant requirement;
+  teacher assignment via email and Accept-Link) and Acceptance
+  Criteria's race-condition and Accept-Link requirements.
+
+VERIFIED:
+  - Every touched PHP file passed `php -l`; JS passed `node --check`.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte
+    against local — clean on every file.
+  - Triggered the dbDelta upgrade via a live admin page load; no
+    fatal errors anywhere.
+  - Full live end-to-end test on staging: created an isolated test
+    session and test teacher, enrolled 4 attendees (confirmed via
+    admin-ajax.php) — no invite fired, correctly, since that's
+    below the minimum of 5. Enrolled a 5th — confirmed via the
+    WP Mail Logging plugin's own log that exactly one invite email
+    went out at that exact point, correctly addressed and
+    subject-lined, with zero send errors. Hit the public Accept-
+    Link endpoint with a deliberately invalid token and confirmed
+    it responds with a clean "Link Expired" page rather than an
+    error. Cleaned up the test session (archived) and test teacher
+    (deleted) afterward via the same admin actions a real user
+    would use.
+  - Known minor residue: the 5 test bookings created via manual
+    enrollment during this test remain in the bookings table,
+    attached to the now-archived/cancelled test session — there is
+    no existing "unenroll" admin action to remove them via the UI
+    (a pre-existing gap, not introduced by this change). Harmless
+    (session is cancelled, so they do not appear as active), but
+    flagged here rather than left undisclosed. A direct DB cleanup
+    is possible on request if this is unwanted.
+
+DEPLOY NOTE (for the live-site migration later):
+  Same as the previous entry — ship all files together, the
+  DB_VERSION bump auto-runs the schema change on first admin page
+  load. Sending real emails depends on whatever mail
+  delivery/SMTP is configured in production; nothing here is
+  gateway- or SMTP-specific, it all goes through the existing
+  WPES_Emailer::send() -> wp_mail() path.
+------------------------------------------------------------

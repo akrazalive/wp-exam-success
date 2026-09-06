@@ -137,4 +137,144 @@ class WPES_Emailer {
 			$body
 		);
 	}
+
+	/**
+	 * Accept-Link invitation sent to a suitable teacher once a session
+	 * reaches the minimum participant count.
+	 *
+	 * @param object $teacher      Row from wpes_teachers.
+	 * @param object $session      Row from wpes_sessions.
+	 * @param object|null $class   Row from wpes_classes.
+	 * @param string $accept_url   The unique, time-limited Accept-Link.
+	 * @param int    $valid_hours  Validity window, for the copy.
+	 * @return bool
+	 */
+	public static function send_teacher_invite( $teacher, $session, $class, $accept_url, $valid_hours ) {
+		$class_name = $class ? $class->name : __( 'a class', 'wp-exam-success' );
+		$title      = $session->title ?: $class_name;
+		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+
+		$body  = '<p>' . sprintf(
+			/* translators: %s: teacher name */
+			esc_html__( 'Hi %s,', 'wp-exam-success' ),
+			esc_html( $teacher->name )
+		) . '</p>';
+		$body .= '<p>' . sprintf(
+			/* translators: 1: class/session title, 2: date and time */
+			esc_html__( 'A session for %1$s has reached its minimum number of participants and needs a teacher: %2$s.', 'wp-exam-success' ),
+			esc_html( $title ),
+			esc_html( $when )
+		) . '</p>';
+		$body .= '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $accept_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Accept This Session', 'wp-exam-success' ) . '</a></p>';
+		$body .= '<p style="font-size:13px;color:#666;">' . sprintf(
+			/* translators: %d: number of hours */
+			esc_html__( 'This invitation was also sent to other suitable teachers — whoever accepts first is assigned. It expires in %d hours.', 'wp-exam-success' ),
+			(int) $valid_hours
+		) . '</p>';
+
+		return self::send(
+			$teacher->email,
+			sprintf(
+				/* translators: %s: class/session title */
+				__( 'Session invitation — %s', 'wp-exam-success' ),
+				$title
+			),
+			$body
+		);
+	}
+
+	/**
+	 * Sent to every confirmed attendee once a session locks in (minimum
+	 * reached + teacher assigned) — distinct from the initial order
+	 * confirmation, since this can happen well after purchase.
+	 *
+	 * @param object $session
+	 * @param object|null $class
+	 * @param object $teacher
+	 * @return int Number of attendees successfully emailed.
+	 */
+	public static function send_session_confirmed_to_attendees( $session, $class, $teacher ) {
+		$attendees = WPES_Bookings::get_attendees_for_session( $session->id, array( 'confirmed' ) );
+		if ( empty( $attendees ) ) {
+			return 0;
+		}
+
+		$class_name = $class ? $class->name : __( 'your class', 'wp-exam-success' );
+		$title      = $session->title ?: $class_name;
+		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+		$sent       = 0;
+
+		foreach ( $attendees as $attendee ) {
+			if ( empty( $attendee->customer_email ) ) {
+				continue;
+			}
+
+			$body  = '<p>' . sprintf(
+				/* translators: %s: customer name */
+				esc_html__( 'Hi %s,', 'wp-exam-success' ),
+				esc_html( $attendee->customer_name ?: __( 'there', 'wp-exam-success' ) )
+			) . '</p>';
+			$body .= '<p>' . sprintf(
+				/* translators: 1: session/class title, 2: date and time, 3: teacher name */
+				esc_html__( 'Good news — your session for %1$s on %2$s is confirmed, with %3$s as your teacher.', 'wp-exam-success' ),
+				esc_html( $title ),
+				esc_html( $when ),
+				esc_html( $teacher->name )
+			) . '</p>';
+			$body .= '<p style="margin-top:24px;"><a href="' . esc_url( wc_get_page_permalink( 'myaccount' ) ) . '" style="color:#2563eb;">' . esc_html__( 'View your sessions dashboard', 'wp-exam-success' ) . '</a></p>';
+
+			if ( self::send(
+				$attendee->customer_email,
+				sprintf(
+					/* translators: %s: session/class title */
+					__( 'Your session is confirmed — %s', 'wp-exam-success' ),
+					$title
+				),
+				$body
+			) ) {
+				$sent++;
+			}
+		}
+
+		return $sent;
+	}
+
+	/**
+	 * Admin alert: no teacher accepted a session's Accept-Link within the
+	 * configured validity window.
+	 *
+	 * @param object $session
+	 * @param object|null $class
+	 * @return bool
+	 */
+	public static function send_admin_no_teacher_response( $session, $class ) {
+		$admin_email = get_option( 'admin_email' );
+		if ( ! $admin_email ) {
+			return false;
+		}
+
+		$class_name = $class ? $class->name : __( 'Unknown class', 'wp-exam-success' );
+		$title      = $session->title ?: $class_name;
+		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+		$edit_url   = admin_url( 'admin.php?page=wpes-sessions' );
+
+		$body  = '<p>' . sprintf(
+			/* translators: 1: session/class title, 2: date and time */
+			esc_html__( 'No teacher accepted the invitation for %1$s on %2$s within the configured time window.', 'wp-exam-success' ),
+			esc_html( $title ),
+			esc_html( $when )
+		) . '</p>';
+		$body .= '<p>' . esc_html__( 'This session still has no assigned teacher and needs a manual decision.', 'wp-exam-success' ) . '</p>';
+		$body .= '<p style="margin-top:20px;"><a href="' . esc_url( $edit_url ) . '" style="color:#2563eb;">' . esc_html__( 'Assign a teacher manually', 'wp-exam-success' ) . '</a></p>';
+
+		return self::send(
+			$admin_email,
+			sprintf(
+				/* translators: %s: session/class title */
+				__( 'Action required: no teacher assigned — %s', 'wp-exam-success' ),
+				$title
+			),
+			$body
+		);
+	}
 }

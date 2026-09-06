@@ -508,6 +508,14 @@ class WPES_WooCommerce {
 			foreach ( (array) $booking_ids as $booking_id ) {
 				WPES_Bookings::confirm( $booking_id );
 			}
+
+			// Each confirmed booking may have pushed its session past the
+			// minimum participant threshold — re-check every session on
+			// this line item independently (Developer Spec §4, §7-9).
+			$session_ids = $item->get_meta( '_wpes_session_ids' );
+			foreach ( (array) $session_ids as $session_id ) {
+				WPES_Teacher_Invites::maybe_invite_teachers( (int) $session_id );
+			}
 		}
 	}
 

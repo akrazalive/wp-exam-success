@@ -20,8 +20,56 @@ class WPES_Public {
 
 		add_action( 'wp_ajax_wpes_get_packages', array( __CLASS__, 'ajax_get_packages' ) );
 		add_action( 'wp_ajax_nopriv_wpes_get_packages', array( __CLASS__, 'ajax_get_packages' ) );
-		
+
+		add_action( 'init', array( __CLASS__, 'handle_teacher_accept' ), 5 );
+
 		add_filter( 'body_class', array( __CLASS__, 'body_class' ) );
+	}
+
+	/**
+	 * Handle a teacher clicking their Accept-Link (?wpes_teacher_accept=<token>).
+	 * No login required — the token itself is the credential, the same
+	 * way WPES_Magic_Login's customer link works.
+	 */
+	public static function handle_teacher_accept() {
+		if ( empty( $_GET['wpes_teacher_accept'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		$token = sanitize_text_field( wp_unslash( $_GET['wpes_teacher_accept'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$outcome = WPES_Teacher_Invites::handle_accept( $token );
+
+		switch ( $outcome['result'] ) {
+			case 'accepted':
+				$session = $outcome['session'];
+				$when    = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+				wp_die(
+					sprintf(
+						/* translators: %s: session date and time */
+						esc_html__( "You're confirmed to teach this session on %s. A confirmation email is on its way.", 'wp-exam-success' ),
+						esc_html( $when )
+					),
+					esc_html__( 'Session Accepted', 'wp-exam-success' ),
+					array( 'response' => 200 )
+				);
+				break;
+
+			case 'already_assigned':
+				wp_die(
+					esc_html__( 'This session has already been assigned to another teacher. Thank you for responding.', 'wp-exam-success' ),
+					esc_html__( 'Already Assigned', 'wp-exam-success' ),
+					array( 'response' => 200 )
+				);
+				break;
+
+			default:
+				wp_die(
+					esc_html__( 'This invitation link is invalid or has expired.', 'wp-exam-success' ),
+					esc_html__( 'Link Expired', 'wp-exam-success' ),
+					array( 'response' => 200 )
+				);
+				break;
+		}
 	}
 
 	public static function body_class( $classes ) {

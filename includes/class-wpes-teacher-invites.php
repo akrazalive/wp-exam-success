@@ -1,0 +1,322 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Automatic teacher invitation and Accept-Link acceptance.
+ *
+ * Once a session reaches the configured minimum participant count and
+ * has no assigned teacher, every suitable teacher (WPES_Teachers::
+ * get_teachers_for_class()) gets a unique, time-limited Accept-Link by
+ * email. The first valid acceptance wins; this must be race-condition
+ * safe the same way WPES_Bookings::reserve() is, so acceptance uses a
+ * single conditional UPDATE ... WHERE assigned_teacher_id IS NULL
+ * rather than a read-then-write check.
+ */
+class WPES_Teacher_Invites {
+
+	/**
+	 * Re-evaluate one session: if it has reached the minimum participant
+	 * count, has no assigned teacher yet, and doesn't already have a
+	 * live invitation round in flight, send Accept-Link invitations to
+	 * every suitable teacher.
+	 *
+	 * Safe to call repeatedly (e.g. after every booking confirmation,
+	 * and from the periodic sweep) — it is a no-op once a teacher is
+	 * assigned or a round is already pending.
+	 *
+	 * @param int $session_id
+	 * @return true|string true if invitations were (re)sent, otherwise
+	 *                      a short reason code for why nothing happened.
+	 */
+	public static function maybe_invite_teachers( $session_id ) {
+		$session_id = (int) $session_id;
+		$session    = WPES_Sessions::get( $session_id );
+
+		if ( ! $session || 'scheduled' !== $session->status ) {
+			return 'session_unavailable';
+		}
+		if ( ! empty( $session->assigned_teacher_id ) ) {
+			return 'already_assigned';
+		}
+
+		$settings = WPES_Admin::get_booking_settings();
+
+		$confirmed = self::count_confirmed_attendees( $session_id );
+		if ( $confirmed < $settings['min_participants'] ) {
+			return 'minimum_not_reached';
+		}
+
+		if ( ! $settings['auto_teacher_assignment'] ) {
+			return 'auto_assignment_disabled';
+		}
+
+		if ( self::has_pending_invites( $session_id ) ) {
+			return 'invites_already_pending';
+		}
+
+		$teachers = WPES_Teachers::get_teachers_for_class( $session->class_id );
+		if ( empty( $teachers ) ) {
+			return 'no_suitable_teachers';
+		}
+
+		$class      = WPES_Classes::get( $session->class_id );
+		$expires_at = gmdate( 'Y-m-d H:i:s', time() + ( $settings['teacher_invite_hours'] * HOUR_IN_SECONDS ) );
+		$sent       = 0;
+
+		foreach ( $teachers as $teacher ) {
+			$token      = self::create_invite( $session_id, $teacher->id, $expires_at );
+			$accept_url = self::build_accept_url( $token );
+
+			if ( WPES_Emailer::send_teacher_invite( $teacher, $session, $class, $accept_url, $settings['teacher_invite_hours'] ) ) {
+				$sent++;
+			}
+		}
+
+		return $sent > 0 ? true : 'send_failed';
+	}
+
+	/**
+	 * @param int $session_id
+	 * @param int $teacher_id
+	 * @param string $expires_at_gmt
+	 * @return string The raw (unhashed) token to embed in the email link.
+	 */
+	protected static function create_invite( $session_id, $teacher_id, $expires_at_gmt ) {
+		global $wpdb;
+
+		$token      = bin2hex( random_bytes( 20 ) );
+		$token_hash = hash( 'sha256', $token );
+
+		$wpdb->insert(
+			WPES_DB::teacher_invites_table(),
+			array(
+				'session_id' => (int) $session_id,
+				'teacher_id' => (int) $teacher_id,
+				'token_hash' => $token_hash,
+				'status'     => 'pending',
+				'expires_at' => $expires_at_gmt,
+				'created_at' => WPES_DB::now_gmt(),
+			),
+			array( '%d', '%d', '%s', '%s', '%s', '%s' )
+		);
+
+		return $token;
+	}
+
+	protected static function build_accept_url( $token ) {
+		return add_query_arg( 'wpes_teacher_accept', rawurlencode( $token ), home_url( '/' ) );
+	}
+
+	/**
+	 * @param int $session_id
+	 * @return bool
+	 */
+	public static function has_pending_invites( $session_id ) {
+		global $wpdb;
+		$table = WPES_DB::teacher_invites_table();
+		$count = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE session_id = %d AND status = 'pending' AND expires_at > %s",
+				(int) $session_id,
+				WPES_DB::now_gmt()
+			)
+		);
+		return $count > 0;
+	}
+
+	/**
+	 * @param int $session_id
+	 * @return int Confirmed (paid) attendee count for this session.
+	 */
+	public static function count_confirmed_attendees( $session_id ) {
+		global $wpdb;
+		$table = WPES_DB::bookings_table();
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE session_id = %d AND status = 'confirmed'",
+				(int) $session_id
+			)
+		);
+	}
+
+	/**
+	 * Handle a teacher clicking their Accept-Link.
+	 *
+	 * @param string $token Raw token from the URL.
+	 * @return array{result:string,session?:object,teacher?:object} result is one of:
+	 *   'accepted', 'already_assigned', 'invalid_or_expired'.
+	 */
+	public static function handle_accept( $token ) {
+		global $wpdb;
+
+		$token_hash = hash( 'sha256', sanitize_text_field( $token ) );
+		$table      = WPES_DB::teacher_invites_table();
+
+		$invite = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE token_hash = %s AND status = 'pending' AND expires_at > %s",
+				$token_hash,
+				WPES_DB::now_gmt()
+			)
+		);
+
+		if ( ! $invite ) {
+			return array( 'result' => 'invalid_or_expired' );
+		}
+
+		$session = WPES_Sessions::get( $invite->session_id );
+		$teacher = WPES_Teachers::get( $invite->teacher_id );
+
+		if ( ! $session || ! $teacher ) {
+			return array( 'result' => 'invalid_or_expired' );
+		}
+
+		// Race-condition-safe claim: succeeds only if nobody has been
+		// assigned to this session yet — the same discipline as
+		// WPES_Bookings::reserve()'s row lock, but via a single
+		// conditional UPDATE rather than a transaction, since this is a
+		// one-column compare-and-set with no related rows to lock.
+		$sessions_table = WPES_DB::sessions_table();
+		$updated        = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$sessions_table}
+				 SET assigned_teacher_id = %d, teacher_assigned_at = %s, confirmation_state = 'confirmed', updated_at = %s
+				 WHERE id = %d AND assigned_teacher_id IS NULL",
+				$teacher->id,
+				WPES_DB::now_gmt(),
+				WPES_DB::now_gmt(),
+				$session->id
+			)
+		);
+
+		if ( 1 !== $updated ) {
+			// Someone else's acceptance won the race (or an admin assigned
+			// manually) between the SELECT above and this UPDATE.
+			self::mark_invite( $invite->id, 'superseded' );
+			return array(
+				'result'  => 'already_assigned',
+				'session' => $session,
+				'teacher' => $teacher,
+			);
+		}
+
+		self::mark_invite( $invite->id, 'accepted' );
+		self::supersede_other_invites( $session->id, $invite->id );
+
+		$class = WPES_Classes::get( $session->class_id );
+		WPES_Emailer::send_session_confirmed_to_attendees( $session, $class, $teacher );
+
+		// Reuse the existing meeting-link send path automatically if a
+		// link is already set — see WPES_Meeting_Links::send_for_session().
+		if ( ! empty( $session->meeting_link ) ) {
+			WPES_Meeting_Links::send_for_session( $session->id, 'initial' );
+		}
+
+		return array(
+			'result'  => 'accepted',
+			'session' => WPES_Sessions::get( $session->id ),
+			'teacher' => $teacher,
+		);
+	}
+
+	protected static function mark_invite( $invite_id, $status ) {
+		global $wpdb;
+		$wpdb->update(
+			WPES_DB::teacher_invites_table(),
+			array( 'status' => $status, 'responded_at' => WPES_DB::now_gmt() ),
+			array( 'id' => (int) $invite_id ),
+			array( '%s', '%s' ),
+			array( '%d' )
+		);
+	}
+
+	protected static function supersede_other_invites( $session_id, $except_invite_id ) {
+		global $wpdb;
+		$table = WPES_DB::teacher_invites_table();
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$table} SET status = 'superseded' WHERE session_id = %d AND status = 'pending' AND id != %d",
+				(int) $session_id,
+				(int) $except_invite_id
+			)
+		);
+	}
+
+	/**
+	 * Cron target: expire stale pending invites, and notify the admin for
+	 * any session left with no teacher once its whole invite round has
+	 * expired.
+	 */
+	public static function sweep_expired_invites() {
+		global $wpdb;
+		$table          = WPES_DB::teacher_invites_table();
+		$sessions_table = WPES_DB::sessions_table();
+		$now            = WPES_DB::now_gmt();
+
+		// Sessions with at least one invite about to expire in this sweep,
+		// captured before the UPDATE so we know who to check afterwards.
+		$session_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT DISTINCT session_id FROM {$table} WHERE status = 'pending' AND expires_at <= %s",
+				$now
+			)
+		);
+
+		if ( empty( $session_ids ) ) {
+			return;
+		}
+
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$table} SET status = 'expired' WHERE status = 'pending' AND expires_at <= %s",
+				$now
+			)
+		);
+
+		foreach ( $session_ids as $session_id ) {
+			$session_id = (int) $session_id;
+
+			// If any invite for this session is still pending (a later,
+			// longer-lived one), this session's round isn't over yet.
+			if ( self::has_pending_invites( $session_id ) ) {
+				continue;
+			}
+
+			$session = WPES_Sessions::get( $session_id );
+			if ( ! $session || ! empty( $session->assigned_teacher_id ) ) {
+				continue; // Already resolved — nothing to notify about.
+			}
+
+			$class = WPES_Classes::get( $session->class_id );
+			WPES_Emailer::send_admin_no_teacher_response( $session, $class );
+		}
+	}
+
+	/**
+	 * Cron target: a last safety-net check shortly before each session
+	 * starts, in case something re-opened its eligibility (e.g. a booking
+	 * confirmed after the original triggering event) without a fresh
+	 * invite round being kicked off.
+	 */
+	public static function run_final_checks() {
+		$settings = WPES_Admin::get_booking_settings();
+		$horizon  = gmdate( 'Y-m-d H:i:s', time() + ( $settings['final_check_hours_before'] * HOUR_IN_SECONDS ) );
+
+		$sessions = WPES_Sessions::query(
+			array(
+				'status'   => 'scheduled',
+				'to_gmt'   => $horizon,
+				'per_page' => 200,
+			)
+		);
+
+		foreach ( $sessions as $session ) {
+			if ( ! empty( $session->assigned_teacher_id ) ) {
+				continue;
+			}
+			self::maybe_invite_teachers( $session->id );
+		}
+	}
+}

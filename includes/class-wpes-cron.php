@@ -16,12 +16,24 @@ class WPES_Cron {
 		add_filter( 'cron_schedules', array( __CLASS__, 'add_schedule' ) );
 		add_action( 'wpes_cleanup_expired_reservations', array( 'WPES_Bookings', 'release_expired' ) );
 		add_action( 'wpes_waitlist_match_sessions', array( 'WPES_Waitlist', 'cron_match_sessions' ) );
+		add_action( 'wpes_teacher_invite_sweep', array( 'WPES_Teacher_Invites', 'sweep_expired_invites' ) );
+		add_action( 'wpes_session_final_check', array( 'WPES_Teacher_Invites', 'run_final_checks' ) );
 
 		if ( ! wp_next_scheduled( 'wpes_cleanup_expired_reservations' ) ) {
 			wp_schedule_event( time(), 'wpes_five_minutes', 'wpes_cleanup_expired_reservations' );
 		}
 		if ( ! wp_next_scheduled( 'wpes_waitlist_match_sessions' ) ) {
 			wp_schedule_event( time(), 'wpes_twelve_hours', 'wpes_waitlist_match_sessions' );
+		}
+		// Reuses the two existing schedules above rather than adding new
+		// intervals — Accept-Link expiry needs to be caught promptly
+		// (same cadence as the reservation cleanup), the pre-session
+		// safety-net check does not (same cadence as the waitlist match).
+		if ( ! wp_next_scheduled( 'wpes_teacher_invite_sweep' ) ) {
+			wp_schedule_event( time(), 'wpes_five_minutes', 'wpes_teacher_invite_sweep' );
+		}
+		if ( ! wp_next_scheduled( 'wpes_session_final_check' ) ) {
+			wp_schedule_event( time(), 'wpes_twelve_hours', 'wpes_session_final_check' );
 		}
 	}
 
@@ -40,5 +52,7 @@ class WPES_Cron {
 	public static function deactivate() {
 		wp_clear_scheduled_hook( 'wpes_cleanup_expired_reservations' );
 		wp_clear_scheduled_hook( 'wpes_waitlist_match_sessions' );
+		wp_clear_scheduled_hook( 'wpes_teacher_invite_sweep' );
+		wp_clear_scheduled_hook( 'wpes_session_final_check' );
 	}
 }
