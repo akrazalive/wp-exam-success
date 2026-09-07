@@ -683,3 +683,202 @@ OPEN DECISION FOR THE CLIENT (unchanged):
   charge." Confirmed safe to test on staging — this store sells only
   the 3 exam-package products.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 19:00 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified — version bump)
+  - includes/class-wpes-teacher-invites.php  (modified)
+  - includes/class-wpes-payments.php         (modified)
+  - includes/class-wpes-emailer.php          (modified)
+  - admin/class-wpes-admin.php               (modified)
+
+CHANGE:
+  Client sent the full "WP Exam Success – Required Corrections" pre-
+  acceptance review document (6 numbered items). Addressed each below,
+  in the client's own format (what/why/tested/results). WPES_VERSION
+  1.8.1 -> 1.8.2; no DB_VERSION change (no schema change).
+
+  ITEM 1 — Minimum participant check before final session confirmation
+  ----------------------------------------------------------------------
+  WHAT WAS CHANGED:
+  - WPES_Teacher_Invites::finalize_session_confirmation() now re-checks
+    the confirmed-attendee count against the minimum FIRST, before any
+    confirmation email, meeting-link send, or payment capture. If the
+    minimum no longer holds, the session's assigned_teacher_id,
+    teacher_assigned_at, and confirmation_state are reverted (back to
+    unassigned/pending) instead of silently skipping the side effects —
+    so the session correctly returns to "awaiting invite" rather than
+    being left showing an assigned teacher that was never confirmed.
+  - WPES_Admin::ajax_update_session() (manual admin teacher assignment)
+    now checks the same minimum BEFORE writing assigned_teacher_id at
+    all — the whole save is rejected with a clear error message if the
+    session is below minimum, rather than writing the assignment and
+    relying only on the after-the-fact guard above.
+  - The automatic Accept-Link path (WPES_Teacher_Invites::
+    handle_accept()) already had its own atomic re-check from the
+    previous round (2026-09-07 16:00 UTC entry) — unchanged, and the
+    new central guard in finalize_session_confirmation() is a second,
+    redundant-by-design layer for that path.
+
+  WHY: Client's exact example — a session reaches 5 confirmed
+  participants, invitations are sent, one participant cancels (down to
+  4), and the still-valid Accept-Link must not be able to confirm the
+  session. The Accept-Link path already handled this; the manual admin
+  path did not (zero minimum check existed there before this fix) —
+  this was a genuine, confirmed gap.
+
+  TESTED / RESULTS (live on staging, real admin AJAX calls, not just
+  code review):
+  - Created a fresh test session, enrolled exactly 4 confirmed test
+    attendees (below the minimum of 5).
+  - Attempted manual teacher assignment via the admin Sessions screen's
+    AJAX endpoint: REJECTED, with the response
+    {"success":false,"data":{"message":"Cannot assign a teacher yet —
+    this session has 4 confirmed participant(s), below the minimum of
+    5."}}. Confirmed via the Sessions list the session still showed
+    "Unassigned" — no partial write occurred.
+  - Enrolled a 5th attendee (now exactly at minimum) and retried the
+    identical assignment request: SUCCEEDED. Confirmed via the Sessions
+    list the teacher now shows assigned correctly.
+  - This directly reproduces and resolves the client's exact example
+    scenario for the admin-assignment path. Cleaned up the test session
+    (cancelled) afterward.
+
+  STATUS: Done, deployed, verified live for the manual admin path
+  (the one that was actually missing protection). The central guard in
+  finalize_session_confirmation() was verified by code review — both
+  callers now pre-check before reaching it, so it acts as a safety net
+  that shouldn't fire in normal operation; forcing it to fire directly
+  would require bypassing both pre-checks, which isn't reachable
+  through any real user-facing path.
+
+  ITEM 2 — Payment capture safety
+  ----------------------------------------------------------------------
+  WHAT WAS CHANGED: WPES_Payments::maybe_capture_package_payment()
+  previously set _wpes_captured = 'yes' UNCONDITIONALLY, before even
+  attempting the order status transition that triggers the actual
+  gateway capture — meaning a failed gateway capture would still leave
+  the order permanently marked "captured" internally, with no
+  detection and no way to retry. Fixed:
+  - _wpes_captured is now set ONLY after re-fetching the order fresh
+    from the database (not the in-memory object) and confirming its
+    real status is completed/processing after the status-transition
+    attempt.
+  - If the resulting status is anything else, the wpes_payment_captures
+    claim row is deleted (released) — the next trigger for this order
+    (another session in the package confirming, or a manual re-save)
+    will attempt the capture again from scratch, so failures aren't
+    permanently stuck.
+  - An order note is added explaining exactly what happened.
+  - New WPES_Emailer::send_admin_capture_failed() sends the site admin
+    an email with the order, the session, and the resulting status, so
+    a human can check the gateway directly if automatic retries keep
+    failing.
+
+  WHY: Client's direct concern — "_wpes_captured state must not be set
+  in a way that could make the plugin consider a payment captured when
+  the actual gateway capture has failed." Confirmed this was a genuine
+  gap in the previous implementation (optimistic set-before-verify).
+
+  TESTED / RESULTS: `php -l` clean; deployed and byte-diffed; no fatal
+  errors on any admin screen. NOT exercised against a real failed
+  capture this round — that requires the WooPayments manual-capture
+  setting to be on (see Item 3), so a genuine gateway-level failure can
+  actually be produced. The re-fetch-and-verify logic itself was
+  exercised indirectly: the existing "on-hold" guard and the "already
+  captured" fast path both still behave identically to before when no
+  capture is attempted (regression-safe).
+
+  STATUS: Code complete and deployed. Full live proof (both a
+  successful capture and a genuine failed one) is blocked on the same
+  gateway setting as Item 3.
+
+  ITEM 3 — Full payment end-to-end test on staging
+  ----------------------------------------------------------------------
+  STATUS: NOT YET DONE — blocked on enabling WooPayments' manual-
+  capture setting. Attempted to access WooCommerce > Settings >
+  Payments > WooPayments today; the page loaded, but its settings UI
+  is rendered client-side (React), not plain server HTML, so the
+  actual toggle state can't be read or safely changed through an
+  automated request without risking a misconfigured live payment
+  gateway setting. Asked the client's developer contact (Asif) to flip
+  it manually in the browser; as of this entry, not yet done. THIS IS
+  NOW THE SINGLE BLOCKING ITEM for full payment sign-off — once the
+  setting is on, both the positive case (authorization -> minimum
+  reached -> teacher assigned -> confirmed -> captured) and the
+  negative case (minimum not reached -> replacement flow -> no
+  capture) will be run and this entry updated with the actual results.
+
+  ITEM 4 — Replacement credit: protection against double redemption
+  ----------------------------------------------------------------------
+  STATUS: Already done and live-tested in the 2026-09-07 16:00 UTC
+  entry (no new code this round). Recap: WPES_Replacements::
+  redeem_credit() claims the credit via a single conditional
+  UPDATE ... WHERE status = 'available' before reserving any booking.
+  Live-tested with two genuinely simultaneous redemption requests
+  (parallel background curl processes) against the same real credit:
+  one returned redeem_success, the other redeem_failed, and exactly
+  one booking was created (confirmed via the session's attendee list
+  and the Replacement Credits screen showing the credit used exactly
+  once). This satisfies the client's exact ask — "a single replacement
+  credit must never be redeemable twice, even if two requests are
+  submitted almost simultaneously" — with a genuine concurrent-load
+  test, not just a repeat call.
+
+  ITEM 5 — Teacher invitations: protection against duplicate rounds
+  ----------------------------------------------------------------------
+  STATUS: Already done and live-tested in the 2026-09-07 16:00 UTC
+  entry (no new code this round). Recap: WPES_Teacher_Invites::
+  maybe_invite_teachers() wraps the has_pending_invites() check and the
+  create_invite() calls in a single transaction with
+  SELECT ... FOR UPDATE on the session row, so two near-simultaneous
+  triggers can't both pass the check before either has inserted a row.
+  Live-tested: enrolled a session to exactly its minimum (one
+  invitation round sent, confirmed via the Teacher Invites screen),
+  then enrolled a 6th attendee (a second trigger) — still exactly one
+  invitation round existed afterward, not two.
+
+  ITEM 6 — Final verification and change log
+  ----------------------------------------------------------------------
+  This entry. TASKS.md and the client's own Change_Log_Template.docx
+  updated in parallel to match.
+
+REASON:
+  Direct client pre-acceptance review, "WP Exam Success – Required
+  Corrections" (6 numbered items, received 2026-09-07). Matches
+  Developer Spec §5/§9/§10/§14's race-condition and minimum-participant
+  requirements, and §6's payment-safety requirement.
+
+VERIFIED:
+  - `php -l` clean on every touched file.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on every file.
+  - Live on staging: Dashboard, Sessions, Teachers, Settings all HTTP
+    200, no fatal/parse errors.
+  - Item 1 (admin path): live-tested exactly as described above —
+    rejected below minimum, succeeded at minimum, matching the
+    client's own example scenario precisely.
+  - Items 4 and 5: already live-tested under genuine concurrent load in
+    the previous round; re-confirmed as still correct (no code changed
+    for these this round).
+  - Item 2: code-reviewed and regression-tested; genuine failure-path
+    testing needs Item 3's gateway setting.
+  - Item 3: not done — the one open blocker, needs the client's
+    developer contact to flip the gateway setting in the browser.
+  - Test data cleanup: the one test session created this round (QA-
+    MinCheck-Test-2026-09-07) was cancelled afterward via the same
+    admin action a real user would use. The 5 test bookings on it
+    remain attached to the now-cancelled session — same pre-existing
+    "no unenroll action" gap disclosed in every prior entry, harmless.
+
+OPEN DECISION FOR THE CLIENT (updated — now the single blocking item):
+  Turn on WooPayments' "manual capture" setting (WooCommerce >
+  Settings > Payments > WooPayments > "Issue an authorization on
+  checkout, and capture later.") on staging. This is now required (not
+  just requested) per the client's own pre-acceptance review, Item 3.
+  Once on, the full positive/negative end-to-end payment test (Item 3)
+  and the genuine capture-failure test (Item 2) can both be completed
+  and this change log updated with actual results — nothing else is
+  blocking final payment sign-off.
+------------------------------------------------------------

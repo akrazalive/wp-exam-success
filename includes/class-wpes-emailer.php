@@ -324,4 +324,52 @@ class WPES_Emailer {
 			$body
 		);
 	}
+
+	/**
+	 * Admin alert: a package payment capture attempt did not result in
+	 * the order actually reaching completed/processing status (Developer
+	 * Spec §6 payment-capture safety — Pre-Acceptance Review item 2).
+	 * The plugin will retry automatically the next time a session on this
+	 * order confirms, but a human should check the gateway directly if
+	 * that keeps failing.
+	 *
+	 * @param int    $order_id
+	 * @param int    $session_id
+	 * @param string $resulting_status Order status found after the attempt.
+	 * @return bool
+	 */
+	public static function send_admin_capture_failed( $order_id, $session_id, $resulting_status ) {
+		$admin_email = get_option( 'admin_email' );
+		if ( ! $admin_email ) {
+			return false;
+		}
+
+		$order_url = function_exists( 'wc_get_order' ) && ( $order = wc_get_order( $order_id ) )
+			? $order->get_edit_order_url()
+			: admin_url( 'post.php?post=' . (int) $order_id . '&action=edit' );
+
+		$body  = '<p>' . sprintf(
+			/* translators: 1: order ID, 2: session ID */
+			esc_html__( 'WP Exam Success attempted to capture the pre-authorized package payment for order #%1$d after session #%2$d confirmed, but the capture did not complete.', 'wp-exam-success' ),
+			(int) $order_id,
+			(int) $session_id
+		) . '</p>';
+		$body .= '<p>' . sprintf(
+			/* translators: %s: order status */
+			esc_html__( 'The order\'s status after the attempt was "%s" instead of completed/processing.', 'wp-exam-success' ),
+			esc_html( $resulting_status )
+		) . '</p>';
+		$body .= '<p>' . esc_html__( 'No charge has been recorded internally, and the plugin will automatically retry the next time another session on this order is confirmed. If this keeps failing, please check the payment gateway directly (e.g. an expired authorization window).', 'wp-exam-success' ) . '</p>';
+		$body .= '<p style="margin-top:20px;"><a href="' . esc_url( $order_url ) . '" style="color:#2563eb;">' . esc_html__( 'View the order', 'wp-exam-success' ) . '</a></p>';
+
+		return self::send(
+			$admin_email,
+			sprintf(
+				/* translators: %d: order ID */
+				__( 'Action required: payment capture failed — order #%d', 'wp-exam-success' ),
+				(int) $order_id
+			),
+			$body
+		);
+	}
 }

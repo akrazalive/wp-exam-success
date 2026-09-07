@@ -58,6 +58,23 @@ Both verifications are now also recorded directly in `class-wpes-payments.php`'s
 
 ---
 
+## Pre-Acceptance Review — Required Corrections (2026-09-07)
+
+Client sent the full formal review document, "WP Exam Success – Required Corrections" (6 numbered items). Full detail in `wp-exam-success/CHANGE_LOG.txt`'s 2026-09-07 19:00 UTC entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Minimum-participant check at final confirmation — must apply to **both** Accept-Link and manual admin assignment | ✅ **Fixed & live-tested.** The admin path had *zero* minimum check before this — genuine gap, confirmed and closed. Central guard also added to `finalize_session_confirmation()` itself, per the client's explicit request. |
+| 2 | Payment-capture safety — `_wpes_captured` must never be set for a failed capture | ✅ **Fixed** (code + architecture). `_wpes_captured` is now set only after re-fetching the order and confirming its real post-transition status; a failed capture releases the claim (auto-retries next trigger) and emails the admin. Not yet exercised against a *real* gateway failure — needs item 3's setting. |
+| 3 | Full payment E2E test (positive + negative case) on staging | ❌ **Not done — the one open blocker.** Requires the WooPayments manual-capture setting, which is a JS-rendered settings page I can't safely toggle via automated requests. Needs Asif (or the client) to flip it in the browser. |
+| 4 | Replacement-credit double-redemption protection | ✅ **Already done**, live-tested under genuine concurrent load in the previous round (2026-09-07 16:00 UTC) — no new work this round. |
+| 5 | Duplicate teacher-invitation-round protection | ✅ **Already done**, live-tested in the same previous round — no new work this round. |
+| 6 | Change log update (what/why/tested/results) | ✅ This entry, written in exactly that format. |
+
+**For final acceptance, the client flagged items 3 (payment E2E test), 1's negative case, and 4 (credit concurrency) as most important — 1 and 4 are done and live-proven; 3 is the only remaining gate, and it's a one-click setting change, not a code task.**
+
+---
+
 ## Developer Spec — section by section
 
 ### §1–3 — Objective, extend-not-rebuild, staging-only access

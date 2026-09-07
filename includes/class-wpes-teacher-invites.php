@@ -291,6 +291,37 @@ class WPES_Teacher_Invites {
 			return;
 		}
 
+		// Central final gate (Pre-Acceptance Review item 1): regardless of
+		// which path got a teacher assigned here — the automatic
+		// Accept-Link (already guarded atomically in handle_accept(), so
+		// this is redundant-but-safe for that path) or a manual admin
+		// assignment (WPES_Admin::ajax_update_session(), which has its own
+		// pre-check but this is the true last line of defense) — the
+		// minimum must still genuinely hold right now, before any
+		// confirmation email, meeting-link send, or payment capture fires.
+		// If it doesn't (e.g. a cancellation landed between the
+		// assignment and this call), undo the assignment rather than
+		// silently skipping the side effects, so the session correctly
+		// returns to "awaiting invite" instead of showing an assigned
+		// teacher that was never actually confirmed.
+		$settings = WPES_Admin::get_booking_settings();
+		if ( self::count_confirmed_attendees( $session_id ) < $settings['min_participants'] ) {
+			global $wpdb;
+			$wpdb->update(
+				WPES_DB::sessions_table(),
+				array(
+					'assigned_teacher_id' => null,
+					'teacher_assigned_at' => null,
+					'confirmation_state'  => 'pending',
+					'updated_at'          => WPES_DB::now_gmt(),
+				),
+				array( 'id' => $session_id ),
+				array( '%d', '%s', '%s', '%s' ),
+				array( '%d' )
+			);
+			return;
+		}
+
 		$teacher = WPES_Teachers::get( $session->assigned_teacher_id );
 		$class   = WPES_Classes::get( $session->class_id );
 

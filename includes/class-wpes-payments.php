@@ -53,6 +53,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  *    the meta read/write itself could race. Together they guarantee
  *    exactly one capture per order regardless of how many sessions it
  *    covers or how those sessions confirm.
+ *
+ * Capture-failure safety (Pre-Acceptance Review item 2, 2026-09-07):
+ * CAPTURED_META is set ONLY after re-fetching the order fresh from the
+ * DB and confirming its status actually is completed/processing — never
+ * optimistically before the status transition. If the real status after
+ * the attempt is anything else (the gateway's own capture hook rejected
+ * it), the wpes_payment_captures claim is released so the very next
+ * trigger for this order retries the capture from scratch, an order
+ * note records what happened, and the admin gets an email. The internal
+ * "captured" state can never say yes for a payment that actually failed.
  */
 class WPES_Payments {
 
@@ -123,30 +133,68 @@ class WPES_Payments {
 			return false;
 		}
 
-		$order->update_meta_data( self::CAPTURED_META, 'yes' );
-		$order->update_meta_data( self::CAPTURED_BY_SESSION_META, (int) $session_id );
-		$order->save();
+		$order_id = $order->get_id();
 
 		$order->add_order_note(
 			sprintf(
 				/* translators: %d: session ID */
-				__( 'WP Exam Success: session #%d reached its minimum participants and a teacher was assigned — capturing the pre-authorized package payment now.', 'wp-exam-success' ),
+				__( 'WP Exam Success: session #%d reached its minimum participants and a teacher was assigned — attempting to capture the pre-authorized package payment now.', 'wp-exam-success' ),
 				(int) $session_id
 			)
 		);
 
 		// This status transition is the actual trigger. It deliberately
 		// does not call any gateway-specific capture method — see the
-		// class docblock. If the underlying capture fails at the gateway
-		// (e.g. the 7-day WooPayments authorization window lapsed), the
-		// gateway adds its own order note explaining why; there is no
-		// automatic re-attempt or admin alert for that failure case yet.
+		// class docblock.
 		$order->update_status(
 			'completed',
-			__( 'WP Exam Success: package payment captured — first session confirmed.', 'wp-exam-success' )
+			__( 'WP Exam Success: attempting package payment capture — first session confirmed.', 'wp-exam-success' )
 		);
 
-		return true;
+		// Pre-Acceptance Review item 2: never trust that the status
+		// transition above actually succeeded at the gateway — re-fetch
+		// the order fresh from the DB rather than the in-memory object,
+		// since a gateway's own capture hook (bound to
+		// woocommerce_order_status_completed, same as WooPayments) can
+		// change the status again within this same request if the actual
+		// charge fails. Only mark CAPTURED_META once the order's real,
+		// current status confirms the payment went through — never
+		// optimistically before that.
+		$fresh_order  = wc_get_order( $order_id );
+		$final_status = $fresh_order ? $fresh_order->get_status() : 'unknown';
+
+		if ( $fresh_order && in_array( $final_status, array( 'completed', 'processing' ), true ) ) {
+			$fresh_order->update_meta_data( self::CAPTURED_META, 'yes' );
+			$fresh_order->update_meta_data( self::CAPTURED_BY_SESSION_META, (int) $session_id );
+			$fresh_order->save();
+			return true;
+		}
+
+		// Capture did not actually succeed. Release the claim so this is
+		// not permanently stuck — the next trigger for this order (another
+		// session in the same package confirming later, or a manual admin
+		// re-save) will attempt the capture again from scratch. Internal
+		// state never says "captured" for a payment that wasn't, and the
+		// admin is notified so a human can check the gateway directly if
+		// automatic retries keep failing.
+		$wpdb->delete( WPES_DB::payment_captures_table(), array( 'order_id' => $order_id ), array( '%d' ) );
+
+		if ( $fresh_order ) {
+			$fresh_order->add_order_note(
+				sprintf(
+					/* translators: 1: session ID, 2: resulting order status */
+					__( 'WP Exam Success: payment capture for session #%1$d did not complete — order status is "%2$s" instead of completed/processing. Will retry automatically the next time a session on this order confirms; admin has been notified.', 'wp-exam-success' ),
+					(int) $session_id,
+					$final_status
+				)
+			);
+		}
+
+		if ( class_exists( 'WPES_Emailer' ) ) {
+			WPES_Emailer::send_admin_capture_failed( $order_id, (int) $session_id, $final_status );
+		}
+
+		return false;
 	}
 
 	/**

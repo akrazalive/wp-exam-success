@@ -549,6 +549,28 @@ class WPES_Admin {
 		if ( array_key_exists( 'assigned_teacher_id', $fields ) && $fields['assigned_teacher_id'] ) {
 			$before         = WPES_Sessions::get( $id );
 			$newly_assigned = $before && empty( $before->assigned_teacher_id );
+
+			// Pre-Acceptance Review item 1: manual admin assignment must be
+			// checked against the minimum participant requirement exactly
+			// like the automatic Accept-Link path — reject the whole save
+			// up front rather than writing the assignment and relying only
+			// on finalize_session_confirmation()'s after-the-fact guard.
+			if ( $newly_assigned ) {
+				$settings  = self::get_booking_settings();
+				$confirmed = WPES_Teacher_Invites::count_confirmed_attendees( $id );
+				if ( $confirmed < $settings['min_participants'] ) {
+					wp_send_json_error(
+						array(
+							'message' => sprintf(
+								/* translators: 1: confirmed attendee count, 2: minimum required */
+								__( 'Cannot assign a teacher yet — this session has %1$d confirmed participant(s), below the minimum of %2$d.', 'wp-exam-success' ),
+								$confirmed,
+								$settings['min_participants']
+							),
+						)
+					);
+				}
+			}
 		}
 
 		WPES_Sessions::update( $id, $fields );

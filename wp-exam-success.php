@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Exam Success — Course Session Manager
  * Description: Sells course packages via WooCommerce where each package grants a fixed number of sessions, chosen by the customer from recurring, capacity-limited class sessions. Handles session scheduling, capacity locking, timezone-correct display, and meeting-link dispatch.
- * Version: 1.8.1
+ * Version: 1.8.2
  * Requires PHP: 7.4
  * Requires Plugins: woocommerce
  * Text Domain: wp-exam-success
@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WPES_VERSION', '1.8.1' );
+define( 'WPES_VERSION', '1.8.2' );
 define( 'WPES_PLUGIN_FILE', __FILE__ );
 define( 'WPES_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPES_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
