@@ -536,6 +536,22 @@ class WPES_WooCommerce {
 
 		self::link_bookings_to_order( $order );
 		WPES_Bookings::mark_on_hold_by_order( $order_id );
+
+		// Pre-Acceptance Review item 3 E2E test finding (2026-09-07): with
+		// manual capture enabled, every new order lands here (authorized,
+		// not yet captured) instead of going straight to
+		// processing/completed — so this is the only place a
+		// manual-capture order's bookings ever get a chance to push a
+		// session to its minimum. Without this, the invite -> assign ->
+		// capture chain could never start and the order would sit
+		// on-hold indefinitely. Mirrors confirm_bookings_for_order()'s
+		// per-session re-check exactly.
+		foreach ( $order->get_items() as $item ) {
+			$session_ids = $item->get_meta( '_wpes_session_ids' );
+			foreach ( (array) $session_ids as $session_id ) {
+				WPES_Teacher_Invites::maybe_invite_teachers( (int) $session_id );
+			}
+		}
 	}
 
 	/**

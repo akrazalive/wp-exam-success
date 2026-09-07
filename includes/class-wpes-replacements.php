@@ -40,7 +40,13 @@ class WPES_Replacements {
 		}
 
 		$class     = WPES_Classes::get( $session->class_id );
-		$bookings  = WPES_Bookings::get_attendees_for_session( $session->id, array( 'confirmed' ) );
+		// Includes 'on-hold' (order authorized under manual capture,
+		// never captured since this session never reached its minimum) —
+		// those customers are equally entitled to a replacement credit;
+		// without this, an on-hold booking on a failed session would be
+		// silently left uncancelled and its customer never notified
+		// (Pre-Acceptance Review item 3 E2E test finding, 2026-09-07).
+		$bookings  = WPES_Bookings::get_attendees_for_session( $session->id, array( 'confirmed', 'on-hold' ) );
 
 		foreach ( $bookings as $booking ) {
 			WPES_Bookings::cancel( $booking->id );

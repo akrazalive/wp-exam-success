@@ -158,15 +158,27 @@ class WPES_Teacher_Invites {
 	}
 
 	/**
+	 * Counts genuinely reserved attendees for a session — bookings that
+	 * are either fully 'confirmed' (order already processing/completed)
+	 * or 'on-hold' (order authorized under manual capture, awaiting the
+	 * capture this whole class exists to trigger). Both represent a real
+	 * placed reservation the Developer Spec's minimum-participant check
+	 * (§7, §9) cares about; only 'pending'/'cancelled'/'expired' are
+	 * excluded. Found via live E2E testing (Pre-Acceptance Review item 3,
+	 * 2026-09-07): counting 'confirmed' alone meant an on-hold order's
+	 * bookings could never push a session to its minimum, so the whole
+	 * invite -> assign -> capture chain could never start while manual
+	 * capture was enabled — a deadlock.
+	 *
 	 * @param int $session_id
-	 * @return int Confirmed (paid) attendee count for this session.
+	 * @return int
 	 */
 	public static function count_confirmed_attendees( $session_id ) {
 		global $wpdb;
 		$table = WPES_DB::bookings_table();
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT COUNT(*) FROM {$table} WHERE session_id = %d AND status = 'confirmed'",
+				"SELECT COUNT(*) FROM {$table} WHERE session_id = %d AND status IN ('confirmed','on-hold')",
 				(int) $session_id
 			)
 		);
@@ -224,7 +236,7 @@ class WPES_Teacher_Invites {
 				"UPDATE {$sessions_table}
 				 SET assigned_teacher_id = %d, teacher_assigned_at = %s, confirmation_state = 'confirmed', updated_at = %s
 				 WHERE id = %d AND assigned_teacher_id IS NULL
-				   AND ( SELECT COUNT(*) FROM {$bookings_table} WHERE session_id = %d AND status = 'confirmed' ) >= %d",
+				   AND ( SELECT COUNT(*) FROM {$bookings_table} WHERE session_id = %d AND status IN ('confirmed','on-hold') ) >= %d",
 				$teacher->id,
 				WPES_DB::now_gmt(),
 				WPES_DB::now_gmt(),
@@ -322,6 +334,16 @@ class WPES_Teacher_Invites {
 			return;
 		}
 
+		// This session is now genuinely confirmed (minimum met + teacher
+		// assigned) — its own bookings graduate from 'on-hold' (order
+		// authorized, awaiting capture) to 'confirmed', independent of
+		// whether this specific session's order capture succeeds below.
+		// Capture is a package-level, once-only event; session
+		// confirmation is per-session (Developer Spec §8) — other
+		// sessions sharing the same order/package that haven't reached
+		// their own minimum stay 'on-hold' until they do.
+		WPES_Bookings::confirm_on_hold_by_session( $session_id );
+
 		$teacher = WPES_Teachers::get( $session->assigned_teacher_id );
 		$class   = WPES_Classes::get( $session->class_id );
 
@@ -333,12 +355,15 @@ class WPES_Teacher_Invites {
 			WPES_Meeting_Links::send_for_session( $session->id, 'initial' );
 		}
 
-		// Capture each distinct order that has a confirmed booking for
+		// Capture each distinct order that has a reserved booking for
 		// this session — a session is shared across potentially many
 		// different customers' packages, and each package's payment is
-		// captured independently (Developer Spec §6).
+		// captured independently (Developer Spec §6). Includes 'on-hold'
+		// bookings (just promoted to 'confirmed' above, but re-fetched
+		// fresh here regardless) so a manual-capture order's payment
+		// actually gets captured — the entire point of this method.
 		if ( class_exists( 'WPES_Payments' ) ) {
-			$bookings = WPES_Bookings::get_attendees_for_session( $session_id, array( 'confirmed' ) );
+			$bookings = WPES_Bookings::get_attendees_for_session( $session_id, array( 'confirmed', 'on-hold' ) );
 			$order_ids = array();
 			foreach ( $bookings as $booking ) {
 				if ( ! empty( $booking->order_id ) ) {

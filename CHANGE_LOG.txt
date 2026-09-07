@@ -882,3 +882,187 @@ OPEN DECISION FOR THE CLIENT (updated — now the single blocking item):
   and this change log updated with actual results — nothing else is
   blocking final payment sign-off.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 19:45 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified — version bump)
+  - includes/class-wpes-teacher-invites.php  (modified)
+  - includes/class-wpes-bookings.php         (modified)
+  - includes/class-wpes-woocommerce.php      (modified)
+  - includes/class-wpes-emailer.php          (modified)
+  - includes/class-wpes-replacements.php     (modified)
+
+CHANGE:
+  Client enabled WooPayments' manual-capture setting and completed two
+  real test purchases (WooPayments/Stripe test card, test mode) for
+  the required full payment end-to-end test (Item 3): order #1177 for
+  the positive case, order #1178 for the negative case. Running the
+  actual flow against these two real orders surfaced a CRITICAL,
+  PRE-EXISTING BUG that had never been caught before, because manual
+  capture had never been turned on and tested end-to-end until now.
+  This is exactly what the client's required E2E test exists to catch.
+  Fixed the same day. WPES_VERSION 1.8.2 -> 1.8.3; no DB_VERSION
+  change (no schema change, only status-handling logic).
+
+  THE BUG:
+  With manual capture enabled, every new order lands on 'on-hold'
+  (authorized, not yet captured) at checkout — this is normal,
+  expected gateway behaviour. WPES_WooCommerce::mark_bookings_on_hold_
+  for_order() (pre-existing, originally built for offline/bank-transfer
+  on-hold orders) marks that order's bookings with booking status
+  'on-hold' — a status distinct from 'confirmed'. But:
+  - WPES_Teacher_Invites::count_confirmed_attendees() — the function
+    every minimum-participant check in the plugin calls — only ever
+    counted status = 'confirmed'. 'on-hold' bookings never counted
+    toward the minimum.
+  - Nothing ever called maybe_invite_teachers() when an order went
+    on-hold — that call only happened from confirm_bookings_for_order(),
+    which is hooked to woocommerce_order_status_processing/completed,
+    never to on-hold.
+  Together: an on-hold order's bookings could NEVER push a session to
+  its minimum, so the invite -> teacher-assignment -> confirmation ->
+  capture chain could never start on its own, so the order would sit
+  on-hold indefinitely (until WooPayments' own 7-day auto-cancel).
+  With every single new order landing on-hold once manual capture is
+  on, this would have silently broken the minimum-participant/
+  teacher-assignment/payment-capture pipeline for the entire site the
+  moment the client turned this setting on for real use — a complete
+  deadlock, not a partial degradation.
+
+  THE FIX (five call sites, one consistent rule: 'on-hold' bookings
+  count as genuinely reserved, the same as 'confirmed', for every
+  purpose except the customer-facing "has this order's payment
+  settled" question):
+  1. WPES_Teacher_Invites::count_confirmed_attendees() — now counts
+     status IN ('confirmed','on-hold').
+  2. WPES_Teacher_Invites::handle_accept()'s atomic UPDATE — the
+     correlated subquery re-check now uses the same IN ('confirmed',
+     'on-hold') condition.
+  3. WPES_WooCommerce::mark_bookings_on_hold_for_order() — now also
+     loops the order's line items and calls maybe_invite_teachers() per
+     session, mirroring confirm_bookings_for_order()'s existing pattern
+     exactly. This is the piece that actually starts the chain.
+  4. WPES_Teacher_Invites::finalize_session_confirmation() — now
+     promotes that specific session's 'on-hold' bookings to 'confirmed'
+     via a new WPES_Bookings::confirm_on_hold_by_session() the moment
+     the session is genuinely confirmed (scoped to that one session
+     only — other sessions in the same multi-session package stay
+     'on-hold' until they individually reach their own minimum, per
+     Developer Spec §8's independent-session-processing requirement).
+     Its capture-order-lookup and WPES_Emailer::send_session_confirmed_
+     to_attendees() now both include 'on-hold' bookings too.
+  5. WPES_Replacements::process_session_failure() — now cancels and
+     issues a replacement credit for 'on-hold' bookings on a failed
+     session too, not just 'confirmed' ones, so an on-hold customer on
+     a session that never reaches minimum is not silently skipped.
+
+REASON:
+  Developer Specification §6 (payment logic), §7 steps 7-9 (minimum-
+  participant and teacher-assignment checks), §9 (minimum participant
+  requirement), §11 (replacement session) — all of these implicitly
+  assume a reserved booking counts toward these checks regardless of
+  whether the underlying payment has been fully captured yet, which
+  the pre-existing code did not correctly implement for the
+  authorize-then-capture path specifically. Directly triggered by
+  Pre-Acceptance Review Item 3's required full E2E test.
+
+VERIFIED — LIVE, WITH REAL ORDERS, REAL GATEWAY, REAL MONEY-SHAPED
+FLOW (test mode, no real charge):
+
+  POSITIVE CASE (order #1177, debugging.specialist@gmail.com, 4-session
+  pack, $69.00, card ending 4242):
+  - Confirmed order landed 'on-hold' after checkout (authorization
+    taken, not captured) — verified via the order edit screen's status
+    dropdown.
+  - Order's real bookings: "Reading + Listening — Tuesday" (Sep 9) and
+    "Listening + Speaking — Monday" (Sep 14) both created as 'on-hold'
+    bookings, correctly linked to order #1177.
+  - Deployed the fix, then manually assigned a teacher to the Tuesday
+    session (which already had 5 other reserved attendees from
+    pre-existing data — a realistic scenario for a shared recurring
+    class, per the spec's own rotating-course model).
+  - RESULT: order #1177 status flipped from "On hold" to "Completed".
+    Order notes: "session #17 reached its minimum participants and a
+    teacher was assigned — attempting to capture the pre-authorized
+    package payment now" followed by "Order status changed from On
+    hold to Completed." WooPayments' own note confirms the charge was
+    "successfully captured", with a real Stripe charge ID
+    (ch_3UCzebCBXDkirlL31b3N7phT) and payment intent ID
+    (pi_3UCzebCBXDkirlL3167ntbf8) visible on the order.
+  - Confirmed both of order #1177's bookings show 'Confirmed' status
+    afterward — the Tuesday booking via the new session-scoped
+    promotion (fix #4 above); the Monday booking via the plugin's
+    pre-existing confirm_bookings_for_order() hook reacting to the
+    order reaching 'completed' (this is correct, not a bug: it means
+    "this seat's payment is covered by the package," independent of
+    whether the Monday session itself has a teacher yet).
+  - Confirmed the Monday session itself (only 4 of 10 reserved) was
+    correctly NOT auto-confirmed at the session level — still shows
+    "Unassigned" teacher — proving session independence held even
+    though the shared order was fully captured (Developer Spec §8).
+  - This is the full positive case, proven against a real WooPayments/
+    Stripe test transaction: Authorization -> minimum reached ->
+    teacher assigned -> session confirmed -> payment captured
+    successfully.
+
+  NEGATIVE CASE (order #1178, ahmadjansct@gmail.com, 4-session pack,
+  $69.00, card ending 4242):
+  - Confirmed order landed 'on-hold' after checkout, same as above.
+  - Order's one real booking: "Reading + Listening — Tuesday" (Sep 16),
+    a session that already had 2 other reserved attendees — 3 total
+    reserved with order #1178 included, below the minimum of 5.
+  - Deliberately took no further action (did not artificially push
+    this session to minimum).
+  - RESULT: order #1178 remains "On hold" — confirmed via the order
+    edit screen — with zero capture-related order notes. No payment
+    was captured, exactly as required.
+  - The "session not confirmed / replacement flow" half of this case
+    (fix #5 above) was NOT forced live this round: doing so would
+    require cancelling this specific real "Tuesday, Sep 16" class
+    occurrence, which also has two other genuinely reserved attendees
+    unconnected to this test — inappropriate to disrupt for test
+    purposes. That fix is a one-line extension of the exact same
+    status-set broadening proven correct in the positive case above
+    (WPES_Bookings::get_attendees_for_session() with 'on-hold' added
+    to the status filter), applied to a method (process_session_
+    failure()) that was itself already proven correct for 'confirmed'
+    bookings in the 2026-09-06 17:42 UTC entry's live replacement-flow
+    test. High confidence by direct pattern match; not independently
+    live-fired this round to avoid disrupting real customers.
+  - Also not independently live-fired this round: fix #3 (auto-invite
+    triggering the moment a NEW order goes on-hold) — both order #1177
+    and #1178 had already gone on-hold at checkout, before this fix was
+    deployed, so their original on-hold transition couldn't exercise
+    the new code path. The positive case's actual confirmation used the
+    manual admin-assignment path instead (already proven safe and
+    correct in the 2026-09-07 19:00 UTC entry), which exercises fixes
+    #1, #2, #4, and #5's sibling logic identically. Fix #3 itself is a
+    small, mechanical, exact copy of the already-proven-correct
+    confirm_bookings_for_order() pattern; the underlying mechanism it
+    calls (maybe_invite_teachers()) is heavily tested elsewhere in this
+    project. A genuinely fresh on-hold order (placed after this
+    deployment, left to reach minimum without manual intervention)
+    would be the way to independently prove this specific piece live if
+    desired.
+
+  General:
+  - `php -l` clean on every touched file.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on every file.
+  - No test data created this round — both orders were the client's own
+    real test purchases. Session #17 now has a real, correct teacher
+    assignment reflecting its real 5+ reserved attendees (left in
+    place, not test pollution). No cleanup required.
+
+OPEN ITEMS FOR THE CLIENT:
+  - Manual capture is still ON on staging as of this entry. The client
+    asked "we can then disable it later" — left on pending explicit
+    confirmation to turn it back off, since real testing (and possibly
+    the client's own further review) may still be in progress.
+  - Item 2 (payment-capture failure safety, from the 2026-09-07 19:00
+    UTC entry) still has not been exercised against a genuine gateway
+    failure — both test orders here captured successfully on the first
+    attempt. That remains verified by code review and architecture
+    only.
+------------------------------------------------------------

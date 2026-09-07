@@ -24,7 +24,7 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Teacher assignment via email + Accept-Link (§10) | ✅ |
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
-| Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ⏸ — code done, waiting on one gateway setting |
+| Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
 
 ---
 
@@ -75,6 +75,22 @@ Client sent the full formal review document, "WP Exam Success – Required Corre
 
 ---
 
+## Payment End-to-End Test — Item 3 (2026-09-07, completed)
+
+Client enabled manual capture and completed two real test purchases. Running them surfaced a **critical, pre-existing bug** — full detail in `wp-exam-success/CHANGE_LOG.txt`'s 2026-09-07 19:45 UTC entry.
+
+**The bug:** with manual capture on, every new order lands 'on-hold' at checkout. The plugin's minimum-participant check only ever counted bookings with status `'confirmed'` — `'on-hold'` bookings never counted, and nothing ever re-triggered the teacher-invite check when an order went on-hold. Result: an on-hold order's bookings could **never** push a session to its minimum, so the whole invite → assign → capture chain could never start, and the order would sit on-hold forever. This would have silently broken the payment feature for every single order the moment manual capture went live in production — never caught before because manual capture had never actually been tested end-to-end until this required test forced it.
+
+**The fix:** five call sites now treat `'on-hold'` bookings as genuinely reserved (same as `'confirmed'`) for minimum-checking, teacher-invite-triggering, and replacement-credit purposes, while keeping session-level independence intact (Developer Spec §8) — a booking's own confirmed/on-hold status now correctly tracks "is my seat's payment settled," separate from whether its specific session has its own teacher yet.
+
+**Verified live, with real orders, real gateway, test-mode money:**
+- **Positive case** (order #1177, $69.00, card •••4242): started 'On hold' → teacher assigned to its session → order flipped to **'Completed'** with a real Stripe charge (`ch_3UCzebCBXDkirlL31b3N7phT`) and WooPayments' own "successfully captured" note. Confirmed the *other* session in the same package (still below its own minimum) correctly stayed unassigned — proving session independence held even though the shared order was fully captured.
+- **Negative case** (order #1178, $69.00, card •••4242): stayed **'On hold'**, zero capture-related notes, since its session never reached minimum. The "replacement flow" half of this case wasn't forced live (would have meant cancelling a real class occurrence with two unrelated real attendees on it) — that fix is a one-line extension of the same status-broadening just proven correct above, applied to a method already proven correct for 'confirmed' bookings in an earlier round.
+
+**Open items:** manual capture is still ON on staging per the client's own "we can then disable it later" — needs an explicit go-ahead to turn back off. Item 2 (capture-failure safety) still hasn't hit a genuine gateway failure to test against — both test orders here captured successfully first try.
+
+---
+
 ## Developer Spec — section by section
 
 ### §1–3 — Objective, extend-not-rebuild, staging-only access
@@ -96,16 +112,18 @@ Client sent the full formal review document, "WP Exam Success – Required Corre
 - `wp-exam-success/includes/class-wpes-activator.php` (new tables/columns)
 
 ### §6 — Payment Logic
-⏸ Plugin code complete and deployed; inert until WooPayments' "manual capture" gateway setting is turned on (a site config change, not code — paused pending explicit client go-ahead, per the client's own "confirm before payment changes" rule). Verified directly against the installed WooPayments source that this is a genuinely gateway-agnostic trigger (order status transition only, no gateway-specific API calls). Also confirmed: WooPayments cancels an uncaptured authorization after 7 days — the spec's own "verify the gateway's supported pre-auth period" requirement, now answered.
+✅ Verified live 2026-09-07 against a real WooPayments/Stripe test transaction (manual capture now enabled on staging) — real charge captured on the positive case, no capture on the negative case. Verified directly against the installed WooPayments source that this is a genuinely gateway-agnostic trigger (order status transition only, no gateway-specific API calls). Also confirmed: WooPayments cancels an uncaptured authorization after 7 days — the spec's own "verify the gateway's supported pre-auth period" requirement, now answered. See "Payment End-to-End Test — Item 3" above for the critical on-hold/minimum-check bug this testing found and fixed.
 - `wp-exam-success/includes/class-wpes-payments.php` *(new)*
-- `wp-exam-success/includes/class-wpes-teacher-invites.php` (capture trigger wired into `finalize_session_confirmation()`)
+- `wp-exam-success/includes/class-wpes-teacher-invites.php` (capture trigger wired into `finalize_session_confirmation()`; on-hold-counting fix)
+- `wp-exam-success/includes/class-wpes-bookings.php` (on-hold-counting fix)
+- `wp-exam-success/includes/class-wpes-woocommerce.php` (on-hold-counting fix)
 
 ### §7 — Required Booking Workflow (14 steps)
 | Step | Status |
 |---|---|
 | 1. Select package | — unchanged |
 | 2. Select sessions | — unchanged |
-| 3. Pre-authorize payment | ⏸ (see §6) |
+| 3. Pre-authorize payment | ✅ (see §6) |
 | 4. Reserve sessions | ✅ existing mechanism, unchanged |
 | 5. Process each session separately | ✅ |
 | 6. Check capacity | ✅ existing, unchanged |
@@ -114,8 +132,8 @@ Client sent the full formal review document, "WP Exam Success – Required Corre
 | 9. Assign teacher (auto-invite) | ✅ |
 | 10. Teacher accepts (first wins) | ✅ |
 | 11. Confirm session | ✅ |
-| 12. Capture package payment | ⏸ (see §6) |
-| 13. Remaining sessions covered by paid package | ⏸ (see §6) |
+| 12. Capture package payment | ✅ (see §6) |
+| 13. Remaining sessions covered by paid package | ✅ (see §6) |
 | 14. Session cannot proceed → replacement | ✅ |
 
 ### §8 — Independent Session Processing (outcomes A/B/C/D)
@@ -151,17 +169,17 @@ Client sent the full formal review document, "WP Exam Success – Required Corre
 — Reused throughout rather than rebuilt: booking/session DB, reservation mechanism, capacity checking, WooCommerce order/payment hooks, `WPES_Emailer`, cron infrastructure, timezone handling, meeting-link functionality. Customer account (My Sessions) extended, not replaced, for the replacement-credit UI.
 
 ### §14 — Acceptance Criteria
-✅ for every teacher/capacity/replacement-related bullet (verified live). ⏸ for the payment-capture-specific bullets, pending the §6 gateway decision. — for the process bullets (staging-only work, no live access, no regressions observed on existing screens touched).
+✅ for every bullet, including the payment-capture-specific ones as of the 2026-09-07 live E2E test (§6). — for the process bullets (staging-only work, no live access, no regressions observed on existing screens touched).
 
 ### §15 — Delivery and Completion
-Not yet formally "complete" per the spec's own definition, solely because of the one pending gateway-setting decision in §6 — everything else in the spec is implemented and verified.
+All requirements and acceptance criteria in the spec are now implemented and verified, including live end-to-end payment capture. The one open item is a client decision, not a code gap: whether/when to turn WooPayments' manual-capture setting back off on staging (left on since the 2026-09-07 test, per the client's own "we can then disable it later").
 
 ---
 
 ## Overview PDF — diagram elements
 
-- **Top flow (steps 1–5)**: steps 1, 2, 4 unaffected; step 5 ("checked individually") ✅; step 3's "payment is pre-authorized" note ⏸ (see §6).
-- **Green path (A)**: steps 1–4 (minimum reached → invite → accept → confirmed) ✅. Step 5 ("Payment Captured") ⏸.
+- **Top flow (steps 1–5)**: steps 1, 2, 4 unaffected; step 5 ("checked individually") ✅; step 3's "payment is pre-authorized" note ✅ (see §6).
+- **Green path (A)**: steps 1–4 (minimum reached → invite → accept → confirmed) ✅. Step 5 ("Payment Captured") ✅.
 - **Red path (B)**: all four steps (fewer than minimum → doesn't take place → replacement credit → customer picks new session) ✅.
 - **Customer Account** (booked sessions/status, replacement credits, direct link to replace) ✅.
 - **Emails & Links**: booking confirmation, meeting link, reminder (all pre-existing, unaffected) ✅; session-confirmed email ✅; teacher invite email ✅; session-cancelled/replacement email ✅; no-teacher-response admin alert ✅.
@@ -175,10 +193,10 @@ The Overview PDF states *"Teachers are WordPress users with the role 'Teacher.'"
 ## Known disclosed limitations (not blockers, but worth knowing)
 
 - No "unenroll" admin action exists to remove a manually-enrolled booking — pre-existing gap, not introduced by this project. Left a small number of harmless test bookings attached to archived test sessions as a result (documented per-round in `CHANGE_LOG.txt`).
-- No automated detection/alert if a payment capture attempt actually fails at the gateway level (e.g. the 7-day WooPayments window lapsed) — WooPayments logs its own order note in that case, but nothing in this plugin surfaces it separately yet.
+- ~~No automated detection/alert if a payment capture attempt actually fails at the gateway level~~ — ✅ built 2026-09-07: `_wpes_captured` is now only set after verifying the order's real post-transition status, with an automatic retry-on-next-trigger and an admin email (`WPES_Emailer::send_admin_capture_failed()`) on failure. Not yet exercised against a genuine gateway failure (both live E2E test orders captured successfully first try).
 - ~~No dedicated admin screen for browsing replacement credits or teacher invites directly~~ — ✅ built 2026-09-07: "Teacher Invites" and "Replacement Credits" admin screens, `wp-exam-success/admin/views/teacher-invites.php` and `credits.php`.
 - ~~Minor "sessions below minimum" dashboard stat card~~ — ✅ built 2026-09-07: fifth Dashboard stat card, `WPES_Sessions::count_below_minimum()`.
 
 ## Open decision for the client
 
-**Turn on WooPayments' manual-capture setting** (WooCommerce → Settings → Payments → WooPayments → "Issue an authorization on checkout, and capture later.") to activate the §6 payment logic. Confirmed safe to flip on staging — this store sells only the 3 exam-package products, nothing else a global gateway setting could unintentionally affect. As of 2026-09-07, the capture trigger also has a concurrency-safe atomic claim (`wpes_payment_captures` table) — flipping this setting is now also what's needed to exercise that guard live, not just the base payment flow.
+**Manual capture is now ON on staging** (client enabled it 2026-09-07 for the required E2E test) and has been verified live against a real WooPayments/Stripe test transaction — see "Payment End-to-End Test — Item 3" above. The only remaining open item is **when to turn it back off** — the client said "we can then disable it later"; not yet done, pending explicit confirmation.

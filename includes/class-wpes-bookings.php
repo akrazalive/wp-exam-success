@@ -113,6 +113,30 @@ class WPES_Bookings {
 		);
 	}
 
+	/**
+	 * Graduate a specific session's 'on-hold' bookings to 'confirmed'
+	 * once that session itself has genuinely been confirmed (minimum met
+	 * + teacher assigned) — called from
+	 * WPES_Teacher_Invites::finalize_session_confirmation(). Scoped to
+	 * one session, not the whole order: other sessions in the same
+	 * multi-session package stay 'on-hold' until they individually reach
+	 * their own minimum (Developer Spec §8, independent session
+	 * processing).
+	 *
+	 * @param int $session_id
+	 * @return int|false Rows affected.
+	 */
+	public static function confirm_on_hold_by_session( $session_id ) {
+		global $wpdb;
+		return $wpdb->update(
+			WPES_DB::bookings_table(),
+			array( 'status' => 'confirmed', 'reserved_until' => null, 'updated_at' => WPES_DB::now_gmt() ),
+			array( 'session_id' => (int) $session_id, 'status' => 'on-hold' ),
+			array( '%s', '%s', '%s' ),
+			array( '%d', '%s' )
+		);
+	}
+
 	public static function cancel( $booking_id ) {
 		global $wpdb;
 		return $wpdb->update(

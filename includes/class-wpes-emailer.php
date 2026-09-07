@@ -194,7 +194,11 @@ class WPES_Emailer {
 	 * @return int Number of attendees successfully emailed.
 	 */
 	public static function send_session_confirmed_to_attendees( $session, $class, $teacher ) {
-		$attendees = WPES_Bookings::get_attendees_for_session( $session->id, array( 'confirmed' ) );
+		// Includes 'on-hold' as defense-in-depth — by the time this is
+		// called from finalize_session_confirmation(), that session's
+		// on-hold bookings have already been promoted to 'confirmed', but
+		// this stays correct even if called from elsewhere in the future.
+		$attendees = WPES_Bookings::get_attendees_for_session( $session->id, array( 'confirmed', 'on-hold' ) );
 		if ( empty( $attendees ) ) {
 			return 0;
 		}
