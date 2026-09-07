@@ -43,6 +43,21 @@ All four fixes reuse the same compare-and-set/row-lock discipline already establ
 
 ---
 
+## Final Payment Verification (client clarification, 2026-09-07)
+
+Client sent a written clarification of two payment requirements and asked for both to be explicitly verified and recorded before final acceptance. Full detail in `wp-exam-success/CHANGE_LOG.txt`'s 2026-09-07 17:30 UTC entry.
+
+| Requirement | Verified how | Result |
+|---|---|---|
+| Payment provider must be configurable/replaceable via WooCommerce with zero further plugin development | Grepped the entire plugin for any hardcoded gateway reference (WooPayments, Stripe, PayPal, gateway IDs) | ✅ Zero genuine matches — the plugin only ever transitions the WooCommerce order's own status, never calls a gateway API directly |
+| Multi-session package: full amount authorized at checkout, captured exactly once on first confirmed session, never captured again on later sessions | Traced the full call path (`finalize_session_confirmation()` → `maybe_capture_package_payment()`) and the two guards protecting it (`CAPTURED_META` fast path + `wpes_payment_captures` UNIQUE-KEY atomic claim) | ✅ Confirmed by code/architecture — the atomic-claim mechanism itself was already proven correct under real concurrent load in the 2026-09-07 16:00 UTC round (same pattern, used there for replacement credits) |
+
+Both verifications are now also recorded directly in `class-wpes-payments.php`'s docblock (WPES_VERSION bumped 1.8.0 → 1.8.1, documentation-only, no behavior change).
+
+**Still not exercised live against a real authorized charge** — that requires the same open WooPayments manual-capture setting below.
+
+---
+
 ## Developer Spec — section by section
 
 ### §1–3 — Objective, extend-not-rebuild, staging-only access

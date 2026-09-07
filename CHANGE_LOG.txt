@@ -553,3 +553,133 @@ OPEN DECISION FOR THE CLIENT (unchanged from the previous entry):
   entry to be exercised end-to-end live. Still confirmed safe to test
   on staging — this store sells only the 3 exam-package products.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 17:30 UTC
+FILE(S):
+  - wp-exam-success.php               (modified — version bump only)
+  - includes/class-wpes-payments.php  (modified — docblock only)
+
+CHANGE:
+  Client sent a written clarification of two payment requirements and
+  asked for both to be explicitly verified and recorded here before
+  final acceptance:
+
+    1. "The final payment provider must be configurable or replaceable
+        later through WooCommerce without requiring any further
+        development or modification of the WP Exam Success plugin
+        itself."
+    2. "For a multi-session package, the full package amount should be
+        authorized at checkout and captured only once, when the first
+        session is successfully confirmed. Subsequent confirmed
+        sessions belonging to the same package must not trigger
+        another capture."
+
+  Both were audited against the current code. Both already hold —
+  this entry is the formal verification record the client asked for,
+  plus a small documentation-only code change making both guarantees
+  explicit at the source (WPES_VERSION 1.8.0 -> 1.8.1; no DB_VERSION
+  change, no behavior change).
+
+  VERIFICATION — Point 1 (gateway replaceability):
+  - Searched the entire plugin (`grep -rniE` across every .php file)
+    for any hardcoded reference to a specific gateway: WooPayments,
+    Stripe, PayPal, a gateway ID string, or a payment-method
+    comparison. Zero genuine matches (the only hits were "stripe" as
+    a substring of Bootstrap's own "table-striped" CSS class — a
+    false positive, not a gateway reference).
+  - WPES_Payments::maybe_capture_package_payment() — the only code
+    that touches payment state — never calls a gateway API. It only
+    transitions the WooCommerce order's own status
+    ('on-hold' -> 'completed'), which is what WooCommerce's own
+    manual-capture infrastructure hooks into for whichever gateway
+    is active. Confirmed directly against the installed WooPayments
+    source in an earlier round (2026-09-06) that this is exactly how
+    WooPayments' own capture binds to that same core hook.
+  - "Authorize at checkout" (the order landing 'on-hold' with the
+    charge authorized-but-uncaptured) is entirely the gateway's own
+    native behavior once its manual-capture setting is on — nothing
+    in this plugin needs to trigger it. The seat-holding side of that
+    (marking bookings 'on-hold' so they keep their reservation) reuses
+    WPES_WooCommerce::mark_bookings_on_hold_for_order(), a hook that
+    predates this project (already handled offline/bank-transfer
+    on-hold orders) — reused unmodified, not new code written for
+    payment capture specifically.
+  - Conclusion: swapping the live gateway later, or enabling manual
+    capture on a different WooCommerce-compatible gateway, requires
+    zero changes to this plugin. Added an explicit docblock section to
+    class-wpes-payments.php recording this verification for future
+    maintainers.
+
+  VERIFICATION — Point 2 (capture exactly once per package):
+  - Traced the full call path: every session's confirmation (via
+    either the automatic Accept-Link or a manual admin assignment)
+    goes through WPES_Teacher_Invites::finalize_session_confirmation(),
+    which collects the distinct order_id(s) behind that session's
+    confirmed bookings and calls maybe_capture_package_payment() once
+    per order — this already happens once per *session*, by design,
+    so a multi-session package naturally calls it multiple times
+    across its lifetime (once per session as each confirms).
+  - What stops a second (or third, fourth, ...) call from actually
+    capturing again: maybe_capture_package_payment() checks
+    CAPTURED_META first — once 'yes', every later call for that order
+    returns false immediately, before touching anything else. This
+    fast path alone covers the ordinary "one session confirms after
+    another" case for any number of sessions in the package.
+  - What stops two sessions confirming close enough together that the
+    meta read/write itself could race (the exact scenario fixed in
+    the 2026-09-07 16:00 UTC entry): the wpes_payment_captures table's
+    UNIQUE KEY on order_id, claimed via INSERT IGNORE — only the
+    first of any concurrent callers can ever win it, regardless of
+    how many sessions or how close together they confirm.
+  - Together, these two mechanisms guarantee exactly one capture per
+    order no matter how many sessions the package has or in what
+    order/timing they confirm — directly satisfying "subsequent
+    confirmed sessions belonging to the same package must not trigger
+    another capture."
+  - Added the same explicit docblock section (see above) recording
+    this reasoning at the source.
+
+  What was NOT re-verified live this round, and why: exercising the
+  actual authorize-at-checkout and capture-once behavior against a
+  real gateway authorization still requires WooPayments' manual-
+  capture setting to be turned on — the same open item from every
+  prior entry. Not flipped this round for the same reason as before
+  (a live payment-gateway configuration change, intentionally left
+  for explicit client action rather than automated by the
+  developer/AI assistant). The concurrency mechanism itself (atomic
+  claim via a UNIQUE KEY + INSERT IGNORE) was already proven correct
+  under genuine simultaneous load in the 2026-09-07 16:00 UTC entry —
+  for replacement credits, using the identical pattern — so this is
+  not an untested mechanism, just not yet exercised in the payment
+  context specifically with a real authorized charge.
+
+REASON:
+  Direct client request: "Please include both points in the final
+  payment verification and change log." Matches Developer
+  Specification §6's "not hard-coded to a specific payment provider"
+  /"client can add final payment-provider credentials... without
+  redevelopment" requirement and §14's capture-once acceptance
+  criteria.
+
+VERIFIED:
+  - `php -l` clean on both touched files.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on both files.
+  - Live on staging: hit Dashboard, Settings, Sessions, Credits, and
+    Teacher Invites — all HTTP 200, no fatal/parse errors. Confirmed
+    the version bump landed by checking Plugins list: "WP Exam
+    Success — Course Session Manager ... Version 1.8.1".
+  - No schema change, so no dbDelta upgrade needed and none triggered.
+  - No test data created or modified this round (documentation-only
+    change) — nothing to clean up.
+
+OPEN DECISION FOR THE CLIENT (unchanged):
+  Turn on WooPayments' "manual capture" setting (WooCommerce >
+  Settings > Payments > WooPayments > "Issue an authorization on
+  checkout, and capture later.") — this is now the only remaining
+  step to move both of today's verifications from "verified by code
+  and architecture" to "verified live against a real authorized
+  charge." Confirmed safe to test on staging — this store sells only
+  the 3 exam-package products.
+------------------------------------------------------------

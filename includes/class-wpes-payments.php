@@ -28,6 +28,31 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Concurrency: guarded by wpes_payment_captures' UNIQUE KEY on
  * order_id, so two sessions in the same package confirming almost
  * simultaneously can never both trigger a capture for the same order.
+ *
+ * Two requirements confirmed explicitly per client review (2026-09-07):
+ *
+ * 1. Gateway replaceability — this class contains zero gateway-specific
+ *    code (no gateway ID checks, no gateway API calls; grepped clean
+ *    across the whole plugin for any hardcoded reference to WooPayments,
+ *    Stripe, PayPal, etc.). "Authorize at checkout" is entirely the
+ *    gateway's own native behavior once its manual-capture setting is
+ *    on — WooCommerce puts the order into 'on-hold', and the plugin's
+ *    pre-existing WPES_WooCommerce::mark_bookings_on_hold_for_order()
+ *    (already used for offline/bank-transfer on-hold orders before
+ *    this feature existed) holds the seats, unmodified. Swapping the
+ *    live gateway later, or changing which gateway supports manual
+ *    capture, requires zero changes to this plugin.
+ *
+ * 2. Capture-once-per-package — for a multi-session package, every
+ *    session's confirmation calls maybe_capture_package_payment() with
+ *    that order's ID (see WPES_Teacher_Invites::finalize_session_
+ *    confirmation()). The CAPTURED_META check above is the fast path
+ *    that makes every session after the first a no-op; the
+ *    wpes_payment_captures UNIQUE KEY is the actual concurrency
+ *    guarantee for two sessions confirming close enough together that
+ *    the meta read/write itself could race. Together they guarantee
+ *    exactly one capture per order regardless of how many sessions it
+ *    covers or how those sessions confirm.
  */
 class WPES_Payments {
 
