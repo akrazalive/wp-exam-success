@@ -238,7 +238,15 @@ class WPES_WooCommerce {
 			return false;
 		}
 
-		$count = count( $selected );
+		// Count UNIQUE session IDs, not the raw submitted count — a request
+		// selecting the same session twice must not be accepted as a valid
+		// multi-session selection (client pre-acceptance review, edge case 1).
+		// This dedup must happen before the count check, not after it.
+		$session_ids = array_column( $selected, 'id' );
+		$session_ids = array_map( 'intval', $session_ids );
+		$session_ids = array_unique( $session_ids );
+
+		$count = count( $session_ids );
 
 		if ( $meta['unlimited'] ) {
 			if ( $count < $meta['min'] ) {
@@ -257,7 +265,7 @@ class WPES_WooCommerce {
 				wc_add_notice(
 					sprintf(
 						/* translators: 1: selected count, 2: required count */
-						__( 'Please select exactly %2$d sessions for this package (you selected %1$d).', 'wp-exam-success' ),
+						__( 'Please select exactly %2$d unique sessions for this package (you selected %1$d unique session(s)).', 'wp-exam-success' ),
 						$count,
 						$meta['required']
 					),
@@ -266,10 +274,6 @@ class WPES_WooCommerce {
 				return false;
 			}
 		}
-
-		$session_ids = array_column( $selected, 'id' );
-		$session_ids = array_map( 'intval', $session_ids );
-		$session_ids = array_unique( $session_ids );
 
 		foreach ( $session_ids as $session_id ) {
 			$session = WPES_Sessions::get( $session_id );
@@ -300,6 +304,18 @@ class WPES_WooCommerce {
 	 * The frontend sends $_POST['wpes_sessions'] as a JSON-encoded string.
 	 * We decode it, create pending bookings for each session, and store
 	 * both the session data and booking IDs in the cart item.
+	 *
+	 * All-or-nothing across the whole multi-session selection (client
+	 * pre-acceptance review, edge case 2): availability can change between
+	 * validate_add_to_cart()'s capacity check and this actual reservation
+	 * loop (a real race, not just theoretical — a concurrent booking can
+	 * take the last seat in that gap). If any session in this attempt
+	 * fails to reserve, every reservation already made in this same
+	 * attempt is rolled back and the whole add-to-cart is aborted by
+	 * throwing — WooCommerce's own WC_Cart::add_to_cart() wraps this exact
+	 * filter call in a try/catch and turns a thrown Exception into a clean
+	 * error notice with nothing added to the cart, so no partially
+	 * reserved package is ever left behind.
 	 */
 	public static function add_cart_item_data( $cart_item_data, $product_id, $variation_id ) {
 		if ( ! self::is_package_product( $product_id ) ) {
@@ -324,9 +340,15 @@ class WPES_WooCommerce {
 
 		foreach ( $session_ids as $sid ) {
 			$bid = WPES_Bookings::reserve( $sid, array( 'product_id' => $product_id ) );
-			if ( ! is_wp_error( $bid ) ) {
-				$booking_ids[] = $bid;
+
+			if ( is_wp_error( $bid ) ) {
+				foreach ( $booking_ids as $already_reserved_id ) {
+					WPES_Bookings::cancel( $already_reserved_id );
+				}
+				throw new Exception( $bid->get_error_message() );
 			}
+
+			$booking_ids[] = $bid;
 		}
 
 		$cart_item_data['wpes_session_ids'] = $session_ids;

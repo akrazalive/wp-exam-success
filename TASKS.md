@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-07
+**Last updated:** 2026-09-07 (latest: booking edge-case fixes, see below)
 
 ## Legend
 
@@ -25,6 +25,20 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Booking Edge-Case Fixes — Client Pre-Acceptance Review Round 2 (2026-09-07)
+
+Client's latest email flagged two further edge cases, plus asked for one real gateway capture-failure verification, before final acceptance. Full detail in `CHANGE_LOG.txt`'s 2026-09-07 16:46 UTC entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Duplicate session IDs must not count toward a valid multi-session selection | ✅ **Fixed & live-tested.** `validate_add_to_cart()` counted the raw submission before deduplicating — genuine bug, confirmed by direct code read. Fixed by deduplicating first, then counting. Verified live: submitting the same session twice for a 4-session pack is now rejected, naming the real unique count. |
+| 2 | A multi-session reservation must be all-or-nothing — any mid-attempt failure must roll back everything already reserved in that attempt | ✅ **Fixed & live-tested under a genuine (not simulated) capacity race.** `add_cart_item_data()` previously just skipped a failed session and kept the rest booked. Now cancels every already-made reservation and throws — verified against WooCommerce's own core `class-wc-cart.php` that this is exactly how it expects a plugin to reject an add-to-cart from this hook. While live-testing, a real capacity conflict happened naturally on one session mid-request; confirmed the other three sessions already reserved were correctly and immediately cancelled, with zero orphaned bookings left anywhere. |
+| 3 | Verify one real gateway capture-failure scenario | ❌ **Not a code task — needs one real test transaction.** The safety net for this (never marking a payment captured until the real post-transition status is confirmed) was already built in an earlier round. What's missing is someone placing one real checkout with a Stripe test card designed to fail on capture, the same way the earlier positive/negative payment test was done. |
+
+Change log template (`Change_Log_Template.docx`) updated with a matching row via Word automation, and pushed to GitHub alongside the code.
 
 ---
 

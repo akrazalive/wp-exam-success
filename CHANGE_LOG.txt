@@ -1066,3 +1066,97 @@ OPEN ITEMS FOR THE CLIENT:
     attempt. That remains verified by code review and architecture
     only.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 16:46 UTC
+FILE(S):
+  - wp-exam-success.php                     (version bump only)
+  - includes/class-wpes-woocommerce.php      (modified)
+
+CHANGE:
+  Fixed the two additional booking edge cases from the client's latest
+  pre-acceptance review email:
+
+  1. Duplicate session IDs. validate_add_to_cart() computed the
+     required-count check ($count = count($selected)) BEFORE
+     deduplicating the submitted session IDs — array_unique() ran only
+     afterward, purely to build the validation/reservation loop's own
+     list. A request selecting the same session twice for a package
+     that requires an exact number of sessions (e.g. two entries with
+     id=5 plus two more distinct IDs, for a 4-session pack) therefore
+     passed the count check (4 == 4) even though only 3 distinct
+     sessions were actually chosen. Fixed by moving the
+     array_column()/array_map()/array_unique() dedup to run first, and
+     computing $count from the deduped list — a duplicate-containing
+     submission is now correctly rejected, naming the real unique count
+     ("you selected 3 unique session(s)") rather than the raw one.
+
+  2. Partial reservation with no rollback. add_cart_item_data()
+     reserved each session in the loop one at a time via
+     WPES_Bookings::reserve(); if one call returned a WP_Error (its
+     capacity disappeared between validate_add_to_cart()'s check and
+     this actual reservation — a real timing gap, not just a
+     theoretical one), the code silently skipped it and kept going,
+     leaving every session reserved *before* the failure still booked.
+     The customer would end up with a partially reserved package and no
+     error. Fixed to be all-or-nothing: on any WP_Error, every booking
+     ID already reserved in that same attempt is passed to
+     WPES_Bookings::cancel(), then a plain PHP Exception is thrown with
+     the gateway-style error message. This is not a custom abort
+     mechanism — verified directly against WooCommerce core's own
+     class-wc-cart.php (pulled from staging via FTP): WC_Cart::
+     add_to_cart() wraps its entire body, including the
+     woocommerce_add_cart_item_data filter call this function is
+     hooked to, in a try/catch(Exception), converting a thrown
+     Exception into a clean wc_add_notice() error and adding nothing to
+     the cart. So this reuses WooCommerce's own established extension
+     contract for "reject this add-to-cart," rather than inventing one.
+
+REASON:
+  Client's pre-acceptance review email (2026-09-07), two named edge
+  cases required before final acceptance: "the server-side validation
+  should count unique session IDs" and "if reservation of one session
+  fails... the entire booking attempt must fail and any reservations
+  already created during that attempt must be rolled back."
+
+VERIFIED:
+  - `php -l` clean on both touched files.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on both files. No fatal errors on the Dashboard or
+    the public booking/product pages afterward.
+  - Live on staging, real HTTP requests against the real "4 session
+    pack" product (not a synthetic unit test):
+      * Submitted two real session IDs, each listed twice (4 entries,
+        2 unique), for the exact-4-required package. Correctly
+        rejected: "Please select exactly 4 unique sessions for this
+        package (you selected 2 unique session(s))." Confirmed with a
+        fresh, unused session/cookie to rule out a stale notice from
+        earlier manual testing being mistaken for a fresh result.
+      * Separately, while exercising the flow with 4 distinct real
+        session IDs, a genuine capacity conflict arose naturally on
+        one of them mid-attempt (repeated manual testing earlier in
+        this session had legitimately filled it). This is exactly the
+        race the rollback fix targets, and it fired for real, not
+        simulated: the response correctly showed the session's own
+        "just filled up" message, and — checked directly via the
+        Bookings admin report — the other three sessions, which had
+        already been reserved in that same attempt, were immediately
+        cancelled (visible as three new "Cancelled" rows, each with no
+        customer attached, matching this test's minimal reservation
+        call). Checked the Pending tab across the whole system: zero
+        orphaned bookings anywhere.
+  - No manual test-data cleanup needed — the rollback fix cancelled its
+    own reservations as designed; the rejected duplicate-ID submission
+    never created any booking rows to begin with (validation runs
+    before reservation).
+
+OPEN ITEMS FOR THE CLIENT (unchanged from before this entry):
+  - Manual capture still ON on staging, pending explicit confirmation
+    to turn it back off.
+  - The third item from the client's latest email — verifying one real
+    gateway capture-failure scenario — has not changed: it needs the
+    client (or Asif) to place one real test purchase using a Stripe
+    test card designed to fail on capture; the safety net for it was
+    already built and deployed in an earlier round. No code change
+    needed for this item, only that one test transaction.
+------------------------------------------------------------
