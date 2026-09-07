@@ -28,6 +28,21 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 
 ---
 
+## Client Review Round — Concurrency & Safety Hardening (2026-09-07)
+
+Client reviewed the staging build and change log, and flagged four areas to correct before final acceptance (no specific bugs named — each was audited against the running code, and all four turned out to be genuine gaps). Full detail in `wp-exam-success/CHANGE_LOG.txt`'s 2026-09-07 16:00 UTC entry.
+
+| Area flagged | Root cause found | Fix | Verified |
+|---|---|---|---|
+| Minimum-participant check at final confirmation | `handle_accept()` re-checked "no teacher assigned yet" but never re-checked the minimum was still met at accept time | Folded a live confirmed-attendee COUNT into the same atomic UPDATE that claims the assignment | Code review + regression only — the exact edge case needs the real Accept-Link token (email-only), not exercised live this round |
+| Payment-capture safety | `maybe_capture_package_payment()` was a plain read-then-act with no atomicity | New table `wpes_payment_captures`, UNIQUE KEY on `order_id`, claimed via `INSERT IGNORE` | Code review + dbDelta trigger only — needs the WooPayments manual-capture setting on to exercise live (see Open decision below) |
+| Replacement-credit concurrency | `redeem_credit()` checked credit status, then wrote 'used' back much later with no WHERE condition — a textbook double-spend race | Claim the credit first via `UPDATE ... WHERE status = 'available'`; hand it back if the reservation itself then fails | ✅ **Live concurrency test**: fired two simultaneous redemption requests at the same real credit — one succeeded, one correctly rejected, exactly one booking created |
+| Duplicate teacher invitation rounds | `maybe_invite_teachers()` checked `has_pending_invites()` then inserted rows — another check-then-act race | Wrapped check-and-insert in `START TRANSACTION` + `SELECT ... FOR UPDATE` on the session row | ✅ **Live test**: enrolled a session to minimum (1 invite round sent), enrolled a 6th attendee, confirmed still exactly 1 invite row (no duplicate round) |
+
+All four fixes reuse the same compare-and-set/row-lock discipline already established in `WPES_Bookings::reserve()`, per `AGENTS.md`.
+
+---
+
 ## Developer Spec — section by section
 
 ### §1–3 — Objective, extend-not-rebuild, staging-only access
@@ -134,4 +149,4 @@ The Overview PDF states *"Teachers are WordPress users with the role 'Teacher.'"
 
 ## Open decision for the client
 
-**Turn on WooPayments' manual-capture setting** (WooCommerce → Settings → Payments → WooPayments → "Issue an authorization on checkout, and capture later.") to activate the §6 payment logic. Confirmed safe to flip on staging — this store sells only the 3 exam-package products, nothing else a global gateway setting could unintentionally affect.
+**Turn on WooPayments' manual-capture setting** (WooCommerce → Settings → Payments → WooPayments → "Issue an authorization on checkout, and capture later.") to activate the §6 payment logic. Confirmed safe to flip on staging — this store sells only the 3 exam-package products, nothing else a global gateway setting could unintentionally affect. As of 2026-09-07, the capture trigger also has a concurrency-safe atomic claim (`wpes_payment_captures` table) — flipping this setting is now also what's needed to exercise that guard live, not just the base payment flow.

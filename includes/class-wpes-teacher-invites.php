@@ -52,23 +52,54 @@ class WPES_Teacher_Invites {
 			return 'auto_assignment_disabled';
 		}
 
-		if ( self::has_pending_invites( $session_id ) ) {
-			return 'invites_already_pending';
+		// Race-condition-safe claim of the invite round itself. Without
+		// this lock, two near-simultaneous callers for the same session
+		// (e.g. two bookings each confirming within milliseconds of each
+		// other, both pushing the session past its minimum) can both pass
+		// the has_pending_invites() check before either has inserted a
+		// row, and each send a full duplicate round of invites to every
+		// suitable teacher. Locking the session row for the duration of
+		// the check-and-insert serializes that — the same discipline
+		// AGENTS.md requires of any new path touching this row
+		// (WPES_Bookings::reserve()'s FOR UPDATE lock).
+		global $wpdb;
+		$sessions_table = WPES_DB::sessions_table();
+		$wpdb->query( 'START TRANSACTION' );
+
+		$locked = $wpdb->get_row(
+			$wpdb->prepare( "SELECT id, assigned_teacher_id FROM {$sessions_table} WHERE id = %d FOR UPDATE", $session_id )
+		);
+
+		if ( ! $locked || ! empty( $locked->assigned_teacher_id ) || self::has_pending_invites( $session_id ) ) {
+			$wpdb->query( 'COMMIT' );
+			if ( ! $locked ) {
+				return 'session_unavailable';
+			}
+			return ! empty( $locked->assigned_teacher_id ) ? 'already_assigned' : 'invites_already_pending';
 		}
 
 		$teachers = WPES_Teachers::get_teachers_for_class( $session->class_id );
 		if ( empty( $teachers ) ) {
+			$wpdb->query( 'COMMIT' );
 			return 'no_suitable_teachers';
 		}
 
-		$class      = WPES_Classes::get( $session->class_id );
 		$expires_at = gmdate( 'Y-m-d H:i:s', time() + ( $settings['teacher_invite_hours'] * HOUR_IN_SECONDS ) );
-		$sent       = 0;
+		$tokens     = array();
 
 		foreach ( $teachers as $teacher ) {
-			$token      = self::create_invite( $session_id, $teacher->id, $expires_at );
-			$accept_url = self::build_accept_url( $token );
+			$tokens[ $teacher->id ] = self::create_invite( $session_id, $teacher->id, $expires_at );
+		}
 
+		$wpdb->query( 'COMMIT' );
+
+		// Emails (external I/O) are sent only after the transaction
+		// commits and the row lock releases — never hold a DB lock across
+		// a network call to the mail server.
+		$class = WPES_Classes::get( $session->class_id );
+		$sent  = 0;
+		foreach ( $teachers as $teacher ) {
+			$accept_url = self::build_accept_url( $tokens[ $teacher->id ] );
 			if ( WPES_Emailer::send_teacher_invite( $teacher, $session, $class, $accept_url, $settings['teacher_invite_hours'] ) ) {
 				$sent++;
 			}
@@ -173,31 +204,55 @@ class WPES_Teacher_Invites {
 			return array( 'result' => 'invalid_or_expired' );
 		}
 
-		// Race-condition-safe claim: succeeds only if nobody has been
-		// assigned to this session yet — the same discipline as
-		// WPES_Bookings::reserve()'s row lock, but via a single
-		// conditional UPDATE rather than a transaction, since this is a
-		// one-column compare-and-set with no related rows to lock.
+		$settings       = WPES_Admin::get_booking_settings();
 		$sessions_table = WPES_DB::sessions_table();
-		$updated        = $wpdb->query(
+		$bookings_table = WPES_DB::bookings_table();
+
+		// Race-condition-safe claim: succeeds only if nobody has been
+		// assigned to this session yet, AND the session still genuinely
+		// meets the minimum participant count at this exact moment — the
+		// final-confirmation check required by Developer Spec §9/§14. A
+		// cancellation or refund between the invite being sent and this
+		// acceptance (up to teacher_invite_hours later) must not be able
+		// to let a session confirm below minimum. Both conditions live in
+		// the same conditional UPDATE as the assignment itself — the same
+		// discipline as WPES_Bookings::reserve()'s row lock, but via a
+		// compare-and-set (plus this correlated subquery) rather than a
+		// transaction, since it's a single row with no related rows to lock.
+		$updated = $wpdb->query(
 			$wpdb->prepare(
 				"UPDATE {$sessions_table}
 				 SET assigned_teacher_id = %d, teacher_assigned_at = %s, confirmation_state = 'confirmed', updated_at = %s
-				 WHERE id = %d AND assigned_teacher_id IS NULL",
+				 WHERE id = %d AND assigned_teacher_id IS NULL
+				   AND ( SELECT COUNT(*) FROM {$bookings_table} WHERE session_id = %d AND status = 'confirmed' ) >= %d",
 				$teacher->id,
 				WPES_DB::now_gmt(),
 				WPES_DB::now_gmt(),
-				$session->id
+				$session->id,
+				$session->id,
+				$settings['min_participants']
 			)
 		);
 
 		if ( 1 !== $updated ) {
-			// Someone else's acceptance won the race (or an admin assigned
-			// manually) between the SELECT above and this UPDATE.
+			// Either someone else's acceptance won the race (or an admin
+			// assigned manually), or the session has since dropped below
+			// the minimum — re-check which, so the teacher sees the
+			// accurate reason rather than a generic "already assigned".
 			self::mark_invite( $invite->id, 'superseded' );
+
+			$fresh = WPES_Sessions::get( $session->id );
+			if ( $fresh && empty( $fresh->assigned_teacher_id ) && self::count_confirmed_attendees( $session->id ) < $settings['min_participants'] ) {
+				return array(
+					'result'  => 'minimum_no_longer_met',
+					'session' => $fresh,
+					'teacher' => $teacher,
+				);
+			}
+
 			return array(
 				'result'  => 'already_assigned',
-				'session' => $session,
+				'session' => $fresh ?: $session,
 				'teacher' => $teacher,
 			);
 		}

@@ -24,6 +24,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Inert by design until manual capture is actually enabled on the
  * gateway: without it, orders never sit 'on-hold' awaiting a charge, so
  * maybe_capture_package_payment() always no-ops (see the status guard).
+ *
+ * Concurrency: guarded by wpes_payment_captures' UNIQUE KEY on
+ * order_id, so two sessions in the same package confirming almost
+ * simultaneously can never both trigger a capture for the same order.
  */
 class WPES_Payments {
 
@@ -64,6 +68,33 @@ class WPES_Payments {
 		// order was already resolved another way" — either way, safe to
 		// no-op rather than force a status change.
 		if ( 'on-hold' !== $order->get_status() ) {
+			return false;
+		}
+
+		// Atomic claim: a package with several sessions can have more than
+		// one reach "confirmed" within milliseconds of each other (e.g. two
+		// Accept-Link clicks landing back-to-back, or a cron sweep and a
+		// manual admin assignment overlapping), and every confirmation on
+		// this order calls this method. The two checks above are a plain
+		// read of order data and are not safe against that — this INSERT
+		// is: the table's UNIQUE KEY on order_id means only the first of
+		// any concurrent callers can ever win it, the same compare-and-set
+		// discipline as WPES_Bookings::reserve() and
+		// WPES_Teacher_Invites::handle_accept(), just via a dedicated
+		// tracking table instead of a row lock (order storage varies
+		// between HPOS and legacy postmeta, so this stays storage-agnostic).
+		global $wpdb;
+		$claimed = $wpdb->query(
+			$wpdb->prepare(
+				'INSERT IGNORE INTO ' . WPES_DB::payment_captures_table() . ' (order_id, session_id, created_at) VALUES (%d, %d, %s)',
+				$order->get_id(),
+				(int) $session_id,
+				WPES_DB::now_gmt()
+			)
+		);
+
+		if ( 1 !== $claimed ) {
+			// Someone else's call already won the race for this order.
 			return false;
 		}
 

@@ -389,3 +389,167 @@ DEPLOY NOTE (for the live-site migration later):
   Ship all 9 files above together. No DB_VERSION bump, no dbDelta
   upgrade needed — nothing here touches the schema.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 16:00 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified)
+  - includes/class-wpes-db.php               (modified)
+  - includes/class-wpes-activator.php        (modified)
+  - includes/class-wpes-payments.php         (modified)
+  - includes/class-wpes-replacements.php     (modified)
+  - includes/class-wpes-teacher-invites.php  (modified)
+  - public/class-wpes-public.php             (modified)
+
+CHANGE:
+  Client review flagged four areas for correction before final
+  acceptance: the minimum-participant check at the final confirmation
+  stage, payment-capture safety, replacement-credit concurrency, and
+  protection against duplicate teacher invitation rounds. The client's
+  message named the four areas but not specific bugs, so each was
+  audited directly against the running code; all four turned out to
+  be genuine gaps, now fixed. Bumped DB_VERSION 1.7.0 -> 1.8.0 and
+  WPES_VERSION 1.7.1 -> 1.8.0 (one new table).
+
+  1) Minimum-participant check at final confirmation
+     (WPES_Teacher_Invites::handle_accept()):
+     Previously, a teacher's Accept-Link click only re-checked that no
+     teacher was already assigned — it never re-checked that the
+     session still met the minimum participant count at that exact
+     moment. A cancellation/refund between the invite being sent and
+     the teacher clicking (up to teacher_invite_hours later, default
+     4h) could let a session confirm below minimum. Fixed by folding
+     a live COUNT(*) of confirmed bookings into the same conditional
+     UPDATE that claims the assignment, so both checks are atomic
+     together. Added a new outcome, 'minimum_no_longer_met', with its
+     own message on the public Accept-Link page
+     (public/class-wpes-public.php) so a teacher who clicks after
+     that point sees an accurate reason instead of a generic "already
+     assigned".
+
+  2) Payment-capture safety (WPES_Payments::maybe_capture_package_
+     payment()):
+     Previously guarded only by reading order meta and order status —
+     a plain read with no atomicity. A package with several sessions
+     can have more than one reach "confirmed" within milliseconds of
+     each other (two Accept-Link clicks landing back-to-back, or a
+     cron sweep overlapping a manual admin assignment), and every
+     confirmation on the order calls this method — nothing stopped
+     two concurrent calls both seeing "not yet captured" and both
+     proceeding. Fixed with a new table, wpes_payment_captures, whose
+     UNIQUE KEY on order_id makes the claim atomic via INSERT IGNORE:
+     only the first of any concurrent callers for a given order can
+     ever win it. Storage-agnostic by design (works the same under
+     HPOS or legacy postmeta, since it's the plugin's own table, not
+     WooCommerce's order storage).
+
+  3) Replacement-credit concurrency (WPES_Replacements::redeem_
+     credit()):
+     Previously a textbook check-then-act race: the credit's status
+     was read and checked ('available'), and only much later —
+     after reserving and confirming an entirely new booking — was it
+     written back to 'used', with no condition on the WHERE clause.
+     Two near-simultaneous redemption attempts for the same credit (a
+     double-click, two open tabs) could both pass the initial check
+     and each create their own booking, double-spending one credit
+     into two sessions. Fixed by claiming the credit FIRST, via a
+     single conditional UPDATE ... WHERE status = 'available' — only
+     the caller that wins it proceeds to reserve a booking. If the
+     reservation itself then fails (session filled up in the
+     meantime), the credit is handed back to 'available' rather than
+     being burned on a redemption that never happened.
+
+  4) Duplicate teacher invitation rounds
+     (WPES_Teacher_Invites::maybe_invite_teachers()):
+     Previously guarded only by has_pending_invites(), a plain SELECT
+     COUNT checked before inserting new invite rows — another
+     check-then-act race. Two bookings confirming within milliseconds
+     of each other, both pushing the same session past its minimum,
+     could both pass that check before either had inserted a row, and
+     each send a full duplicate round of invites to every suitable
+     teacher (duplicate emails, duplicate DB rows). Fixed by wrapping
+     the check-and-insert in a transaction with SELECT ... FOR UPDATE
+     on the session row — the same locking discipline AGENTS.md
+     requires of any new path touching this row
+     (WPES_Bookings::reserve()). Invite emails (external I/O) are
+     still sent only after the transaction commits, so the lock is
+     never held across a network call.
+
+  All four fixes follow the same compare-and-set/row-lock discipline
+  already established elsewhere in this plugin (WPES_Bookings::
+  reserve(), the original WPES_Teacher_Invites::handle_accept())
+  rather than introducing a new pattern.
+
+REASON:
+  Direct client feedback after reviewing the current staging build
+  and change log, ahead of final acceptance. Matches Developer
+  Specification §5/§14's "even with almost simultaneous ... requests"
+  requirement and §6/§9's minimum-participant and payment-safety
+  requirements — these are hardening fixes to already-implemented
+  features, not new functionality.
+
+VERIFIED:
+  - Every touched PHP file passed `php -l`.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on every file.
+  - Triggered the dbDelta upgrade via a live admin page load (Sessions,
+    Teachers, Settings, Dashboard); no fatal errors on any of them.
+  - Item 4 (duplicate invite rounds) — live test on staging: created a
+    test session, enrolled 5 confirmed test attendees (triggered
+    exactly 1 invite round, to the 1 teacher suitable for that class —
+    confirmed via the new Teacher Invites screen), then enrolled a 6th
+    attendee. Re-checked the Teacher Invites screen: still exactly 1
+    invite row for that session — the repeat call correctly no-opped
+    instead of sending a second round.
+  - Item 3 (replacement-credit concurrency) — live test on staging,
+    genuinely concurrent, not just a repeat call: forced a real test
+    session below minimum through the real final-check cron (via WP
+    Crontrol's "Run now") to get a real credit issued, then fired two
+    redemption requests at the same credit at the same time
+    (background curl processes started together against admin-
+    post.php). Result: one came back redeem_success, the other came
+    back redeem_failed — confirmed via the Replacement Credits screen
+    that the credit shows 'Used' exactly once (not twice), and via the
+    session's attendee list that exactly one booking was created (not
+    two). This is the clearest possible demonstration the fix holds
+    under real concurrent access, not just sequential re-calls.
+  - Item 1 (minimum re-check at final confirmation) — verified by code
+    review and by exercising the surrounding flow live (session
+    creation, enrollment, invite dispatch all worked with no errors);
+    the specific "invite valid but participants dropped below minimum
+    before the teacher clicks" edge case was not exercised end-to-end
+    live, since reaching it requires the exact Accept-Link token
+    (available only from the sent email) and no mail-log viewer access
+    was set up for this round. The fix reuses the identical
+    conditional-UPDATE technique just proven correct live under real
+    concurrency in item 3, applied to an added SQL condition rather
+    than a new mechanism.
+  - Item 2 (payment-capture safety) — the atomic-claim code is
+    deployed and lint-clean, but could not be exercised end-to-end
+    live: doing so requires WooPayments' manual-capture gateway
+    setting to be turned on, which touches live payment-gateway
+    configuration and was intentionally not flipped without further
+    explicit client sign-off on doing it via this channel (see OPEN
+    DECISION below — this is the same pending item flagged in the
+    2026-09-06 17:42 UTC entry, still unresolved).
+  - Test data cleanup: both dedicated QA sessions created for this
+    round (QA-Concurrency-Test-2026-09-07, QA-CreditConcurrency-Test-
+    2026-09-07) were cancelled/archived afterward via the same admin
+    actions a real user would use. One piece of disclosed residue:
+    the credit-redemption race test used the developer's own real
+    account (akrazalive@gmail.com) to redeem into a real, non-test
+    recurring session ("Reading + Listening — Tuesday, Sep 9, 2026"),
+    since redemption requires acting as the credit's actual owner and
+    there is no "unenroll" admin action to remove it afterward (the
+    same pre-existing gap disclosed in earlier entries). Harmless —
+    one real seat on a real session, no other customer affected — but
+    flagged here rather than left undisclosed.
+
+OPEN DECISION FOR THE CLIENT (unchanged from the previous entry):
+  Turn on WooPayments' "manual capture" setting (WooCommerce >
+  Settings > Payments > WooPayments > "Issue an authorization on
+  checkout, and capture later.") to actually activate the payment
+  logic, and to allow the new atomic capture-safety guard in this
+  entry to be exercised end-to-end live. Still confirmed safe to test
+  on staging — this store sells only the 3 exam-package products.
+------------------------------------------------------------

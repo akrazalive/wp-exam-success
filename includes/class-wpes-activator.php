@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_Activator {
 
-	const DB_VERSION = '1.7.0';
+	const DB_VERSION = '1.8.0';
 
 	public static function activate() {
 		self::create_tables();
@@ -54,6 +54,7 @@ class WPES_Activator {
 		$teacher_classes_table = $wpdb->prefix . 'wpes_teacher_classes';
 		$teacher_invites_table = $wpdb->prefix . 'wpes_teacher_invites';
 		$replacement_credits_table = $wpdb->prefix . 'wpes_replacement_credits';
+		$payment_captures_table = $wpdb->prefix . 'wpes_payment_captures';
 
 		$sql_classes = "CREATE TABLE {$classes_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -254,6 +255,23 @@ class WPES_Activator {
 		dbDelta( $sql_teachers );
 		dbDelta( $sql_teacher_classes );
 		dbDelta( $sql_teacher_invites );
+		// One row per order whose package payment has been captured — the
+		// UNIQUE KEY on order_id is the actual concurrency guard: two
+		// sessions in the same package confirming within milliseconds of
+		// each other both call WPES_Payments::maybe_capture_package_payment()
+		// for the same order, and only the INSERT that wins the unique
+		// constraint is allowed to proceed to capture (Developer Spec §6,
+		// §14's "even with almost simultaneous ... requests" requirement).
+		$sql_payment_captures = "CREATE TABLE {$payment_captures_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			order_id BIGINT UNSIGNED NOT NULL,
+			session_id BIGINT UNSIGNED NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY order_id (order_id)
+		) {$charset_collate};";
+
 		dbDelta( $sql_replacement_credits );
+		dbDelta( $sql_payment_captures );
 	}
 }

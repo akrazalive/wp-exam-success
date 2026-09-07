@@ -62,6 +62,14 @@ class WPES_Public {
 				);
 				break;
 
+			case 'minimum_no_longer_met':
+				wp_die(
+					esc_html__( 'Thank you for responding — since this invitation was sent, enough participants have cancelled that this session no longer meets the minimum required to proceed. No assignment is needed at this time.', 'wp-exam-success' ),
+					esc_html__( 'No Longer Needed', 'wp-exam-success' ),
+					array( 'response' => 200 )
+				);
+				break;
+
 			default:
 				wp_die(
 					esc_html__( 'This invitation link is invalid or has expired.', 'wp-exam-success' ),

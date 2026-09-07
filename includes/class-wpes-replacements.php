@@ -146,6 +146,30 @@ class WPES_Replacements {
 			return new WP_Error( 'wpes_credit_forbidden', __( 'This replacement credit does not belong to you.', 'wp-exam-success' ) );
 		}
 
+		global $wpdb;
+		$credits_table = WPES_DB::replacement_credits_table();
+
+		// Atomic claim, before anything else happens: two near-simultaneous
+		// redemption attempts for the same credit (a double-click, two open
+		// tabs) must not both succeed. The earlier read above is just a
+		// friendly pre-check for the ownership/status error messages — this
+		// conditional UPDATE is the actual guard, the same compare-and-set
+		// discipline as WPES_Bookings::reserve() and
+		// WPES_Teacher_Invites::handle_accept(). Only the caller that wins
+		// it is allowed to reserve a new booking against this credit.
+		$claimed = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$credits_table} SET status = 'used', used_session_id = %d, used_at = %s WHERE id = %d AND status = 'available'",
+				$new_session_id,
+				WPES_DB::now_gmt(),
+				$credit->id
+			)
+		);
+
+		if ( 1 !== $claimed ) {
+			return new WP_Error( 'wpes_credit_unavailable', __( 'This replacement credit is no longer available.', 'wp-exam-success' ) );
+		}
+
 		$booking_id = WPES_Bookings::reserve(
 			$new_session_id,
 			array(
@@ -159,6 +183,20 @@ class WPES_Replacements {
 		);
 
 		if ( is_wp_error( $booking_id ) ) {
+			// The chosen session filled up (or vanished) between the claim
+			// above and this reserve() call — give the credit back rather
+			// than burning it on a redemption that never happened.
+			$wpdb->update(
+				$credits_table,
+				array(
+					'status'          => 'available',
+					'used_session_id' => null,
+					'used_at'         => null,
+				),
+				array( 'id' => $credit->id ),
+				array( '%s', '%d', '%s' ),
+				array( '%d' )
+			);
 			return $booking_id;
 		}
 
@@ -166,17 +204,11 @@ class WPES_Replacements {
 		// existing manual-enrollment path.
 		WPES_Bookings::confirm( $booking_id );
 
-		global $wpdb;
 		$wpdb->update(
-			WPES_DB::replacement_credits_table(),
-			array(
-				'status'          => 'used',
-				'used_booking_id' => $booking_id,
-				'used_session_id' => $new_session_id,
-				'used_at'         => WPES_DB::now_gmt(),
-			),
+			$credits_table,
+			array( 'used_booking_id' => $booking_id ),
 			array( 'id' => $credit->id ),
-			array( '%s', '%d', '%d', '%s' ),
+			array( '%d' ),
 			array( '%d' )
 		);
 

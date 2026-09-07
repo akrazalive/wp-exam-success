@@ -59,6 +59,11 @@ class WPES_DB {
 		return $wpdb->prefix . 'wpes_replacement_credits';
 	}
 
+	public static function payment_captures_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'wpes_payment_captures';
+	}
+
 	/** Always use this instead of `date()`/`current_time('mysql')` for stored timestamps — everything in the schema is UTC. */
 	public static function now_gmt() {
 		return gmdate( 'Y-m-d H:i:s' );
