@@ -164,6 +164,58 @@
 			} );
 		}
 
+		/* ---- Teacher Invites DataTable ---- */
+		if ( $( '#wpesInvitesTable' ).length ) {
+			tables.invites = $( '#wpesInvitesTable' ).DataTable( {
+				processing: true,
+				serverSide: true,
+				ajax: {
+					url: WPES_Admin.ajax_url,
+					type: 'POST',
+					data: function ( d ) {
+						d.action = 'wpes_datatable_teacher_invites';
+						d.nonce = WPES_Admin.nonce;
+						d.status_filter = $( '#wpesInviteStatusFilter' ).val();
+					}
+				},
+				pageLength: 25,
+				order: [],
+				dom: 'Bfrtip',
+				buttons: dtButtons(),
+				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
+			} );
+
+			$( '#wpesInviteStatusFilter' ).on( 'change', function () {
+				tables.invites.ajax.reload();
+			} );
+		}
+
+		/* ---- Replacement Credits DataTable ---- */
+		if ( $( '#wpesCreditsTable' ).length ) {
+			tables.credits = $( '#wpesCreditsTable' ).DataTable( {
+				processing: true,
+				serverSide: true,
+				ajax: {
+					url: WPES_Admin.ajax_url,
+					type: 'POST',
+					data: function ( d ) {
+						d.action = 'wpes_datatable_credits';
+						d.nonce = WPES_Admin.nonce;
+						d.status_filter = $( '#wpesCreditStatusFilter' ).val();
+					}
+				},
+				pageLength: 25,
+				order: [],
+				dom: 'Bfrtip',
+				buttons: dtButtons(),
+				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
+			} );
+
+			$( '#wpesCreditStatusFilter' ).on( 'change', function () {
+				tables.credits.ajax.reload();
+			} );
+		}
+
 		/* ---- Waitlist DataTable ---- */
 		if ( $( '#wpesWaitlistTable' ).length ) {
 			tables.waitlist = $( '#wpesWaitlistTable' ).DataTable( {

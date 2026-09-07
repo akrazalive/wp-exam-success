@@ -314,3 +314,78 @@ OPEN DECISION FOR THE CLIENT:
   only the 3 exam-package products, nothing else that a global
   gateway-setting change could unintentionally affect.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-07 05:20 UTC
+FILE(S):
+  - wp-exam-success.php                     (modified)
+  - includes/class-wpes-sessions.php         (modified)
+  - includes/class-wpes-teacher-invites.php  (modified)
+  - includes/class-wpes-replacements.php     (modified)
+  - admin/class-wpes-admin.php               (modified)
+  - admin/views/dashboard.php                (modified)
+  - admin/views/teacher-invites.php          (NEW)
+  - admin/views/credits.php                  (NEW)
+  - admin/js/wpes-admin.js                   (modified)
+
+CHANGE:
+  Closed two of the "known disclosed limitations" from the last
+  progress review: no dedicated admin screen for teacher invites or
+  replacement credits, and no dashboard visibility into sessions
+  sitting below the minimum participant count. Bumped WPES_VERSION
+  1.7.0 -> 1.7.1 (no DB_VERSION bump — purely additive read-side
+  queries and admin UI, no schema change).
+
+  - New admin screen "Teacher Invites" (Exam Success > Teacher
+    Invites): every Accept-Link invitation ever sent, across every
+    session, with status filter (pending/accepted/expired/
+    superseded), sent/expiry/responded timestamps. Previously only
+    visible one session at a time.
+  - New admin screen "Replacement Credits" (Exam Success >
+    Replacement Credits): every credit issued when a session failed
+    to reach its minimum, with status filter (available/used),
+    source session, and (once redeemed) the replacement session it
+    was used on. Previously only visible one customer at a time via
+    My Account.
+  - Both follow the existing Teachers/Waitlist screen pattern exactly
+    (Bootstrap 5 + server-side DataTables, same nonce/capability
+    discipline) rather than hand-rolling a new UI pattern.
+  - New WPES_Teacher_Invites::query()/count_query() and
+    WPES_Replacements::query()/count_query(), joined against
+    teachers/sessions/classes, backing the two new DataTable AJAX
+    endpoints (wp_ajax_wpes_datatable_teacher_invites,
+    wp_ajax_wpes_datatable_credits).
+  - New WPES_Sessions::count_below_minimum() — counts upcoming,
+    still-scheduled sessions whose confirmed attendee count hasn't
+    reached the configured minimum yet. Wired into a 5th Dashboard
+    stat card, "Sessions Below Minimum", alongside the existing four.
+
+REASON:
+  Client follow-up request after the previous progress review, citing
+  two items from that review's "Known disclosed limitations" list
+  directly (no admin screen for credits/invites; no below-minimum
+  dashboard stat). Not required by the Developer Specification itself
+  — both are admin-visibility conveniences, not customer-facing
+  workflow changes — but requested explicitly, so implemented and
+  deployed the same as any other item.
+
+VERIFIED:
+  - Every touched/new PHP file passed `php -l`; JS passed `node --check`.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local (after normalizing local CRLF to the server's existing LF
+    line endings) — clean on every file.
+  - Full live check on staging as a real logged-in admin session:
+    loaded the Dashboard (new stat card renders, correct count),
+    Teacher Invites screen, and Replacement Credits screen — all
+    HTTP 200, no fatal/parse errors. Hit both new DataTable AJAX
+    endpoints directly and confirmed real, correctly-joined data
+    comes back (3 invites; 34 credits, including one genuinely
+    redeemed credit showing its replacement session) and that the
+    status filter narrows results correctly (34 -> 1 filtering to
+    "used"). No data was created or modified during this check —
+    read-only queries only, so no test-data cleanup needed.
+
+DEPLOY NOTE (for the live-site migration later):
+  Ship all 9 files above together. No DB_VERSION bump, no dbDelta
+  upgrade needed — nothing here touches the schema.
+------------------------------------------------------------

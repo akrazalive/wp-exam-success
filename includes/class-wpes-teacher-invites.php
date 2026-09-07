@@ -339,6 +339,94 @@ class WPES_Teacher_Invites {
 	}
 
 	/**
+	 * Count invites matching filters (for the admin DataTable).
+	 *
+	 * @param string $search
+	 * @param string $status
+	 * @return int
+	 */
+	public static function count_query( $search = '', $status = '' ) {
+		global $wpdb;
+		list( $where_sql, $params ) = self::build_where( $search, $status );
+
+		$table          = WPES_DB::teacher_invites_table();
+		$teachers_table = WPES_DB::teachers_table();
+		$sessions_table = WPES_DB::sessions_table();
+
+		$sql = "SELECT COUNT(*) FROM {$table} i
+			INNER JOIN {$teachers_table} t ON t.id = i.teacher_id
+			INNER JOIN {$sessions_table} s ON s.id = i.session_id
+			WHERE {$where_sql}";
+
+		if ( empty( $params ) ) {
+			return (int) $wpdb->get_var( $sql );
+		}
+		return (int) $wpdb->get_var( $wpdb->prepare( $sql, $params ) );
+	}
+
+	/**
+	 * List teacher invites for the admin "Teacher Invites" screen —
+	 * every invite ever sent, across every session, so the admin no
+	 * longer has to open each session individually to see who was asked
+	 * and how they responded.
+	 *
+	 * @param array $args { search, status, per_page, page }
+	 * @return object[]
+	 */
+	public static function query( array $args = array() ) {
+		global $wpdb;
+		list( $where_sql, $params ) = self::build_where( $args['search'] ?? '', $args['status'] ?? '' );
+
+		$per_page = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 25;
+		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
+		$offset   = ( $page - 1 ) * $per_page;
+
+		$table          = WPES_DB::teacher_invites_table();
+		$teachers_table = WPES_DB::teachers_table();
+		$sessions_table = WPES_DB::sessions_table();
+		$classes_table  = WPES_DB::classes_table();
+
+		$sql = "SELECT i.*, t.name AS teacher_name, t.email AS teacher_email,
+				s.title AS session_title, s.starts_at_gmt AS session_starts_at_gmt,
+				c.name AS class_name
+			FROM {$table} i
+			INNER JOIN {$teachers_table} t ON t.id = i.teacher_id
+			INNER JOIN {$sessions_table} s ON s.id = i.session_id
+			LEFT JOIN {$classes_table} c ON c.id = s.class_id
+			WHERE {$where_sql}
+			ORDER BY i.created_at DESC
+			LIMIT %d OFFSET %d";
+
+		$params[] = $per_page;
+		$params[] = $offset;
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
+	}
+
+	/**
+	 * @return array{0:string,1:array}
+	 */
+	protected static function build_where( $search, $status ) {
+		global $wpdb;
+		$where  = array( '1=1' );
+		$params = array();
+
+		if ( '' !== $status ) {
+			$where[]  = 'i.status = %s';
+			$params[] = sanitize_key( $status );
+		}
+		if ( '' !== $search ) {
+			$where[]  = '(t.name LIKE %s OR t.email LIKE %s OR s.title LIKE %s)';
+			$like     = '%' . $wpdb->esc_like( $search ) . '%';
+			$params[] = $like;
+			$params[] = $like;
+			$params[] = $like;
+		}
+
+		return array( implode( ' AND ', $where ), $params );
+	}
+
+	/**
 	 * Cron target: the final check before each session starts (Developer
 	 * Spec §11, Overview PDF's "final time-based check ... default 24
 	 * hours before start"). A still-unconfirmed session this close to

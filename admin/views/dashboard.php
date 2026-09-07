@@ -12,6 +12,8 @@ $total_classes      = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$classes_tabl
 $upcoming_sessions  = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$sessions_table} WHERE status = 'scheduled' AND starts_at_gmt >= %s", WPES_DB::now_gmt() ) );
 $confirmed_bookings = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$bookings_table} WHERE status = 'confirmed'" );
 $sessions_no_link   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$sessions_table} WHERE status = 'scheduled' AND starts_at_gmt >= %s AND (meeting_link IS NULL OR meeting_link = '')", WPES_DB::now_gmt() ) );
+$booking_settings   = WPES_Admin::get_booking_settings();
+$sessions_below_min = WPES_Sessions::count_below_minimum( $booking_settings['min_participants'] );
 ?>
 <div class="wrap wpes-wrap">
 	<div class="container-fluid px-0">
@@ -54,6 +56,17 @@ $sessions_no_link   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FRO
 						<div class="card-body">
 							<div class="text-muted small"><?php esc_html_e( 'Sessions Missing Meeting Link', 'wp-exam-success' ); ?></div>
 							<div class="fs-2 fw-bold <?php echo $sessions_no_link > 0 ? 'text-warning' : 'text-dark'; ?>"><?php echo esc_html( $sessions_no_link ); ?></div>
+						</div>
+					</div>
+				</a>
+			</div>
+			<div class="col-md-3">
+				<a href="<?php echo esc_url( admin_url( 'admin.php?page=wpes-sessions' ) ); ?>" class="text-decoration-none">
+					<div class="card shadow-sm wpes-stat-card h-100 <?php echo $sessions_below_min > 0 ? 'border-warning' : ''; ?>">
+						<div class="card-body">
+							<div class="text-muted small"><?php esc_html_e( 'Sessions Below Minimum', 'wp-exam-success' ); ?></div>
+							<div class="fs-2 fw-bold <?php echo $sessions_below_min > 0 ? 'text-warning' : 'text-dark'; ?>"><?php echo esc_html( $sessions_below_min ); ?></div>
+							<div class="text-muted small mt-1"><?php echo esc_html( sprintf( /* translators: %d: minimum participant count */ __( 'Upcoming, fewer than %d confirmed', 'wp-exam-success' ), $booking_settings['min_participants'] ) ); ?></div>
 						</div>
 					</div>
 				</a>

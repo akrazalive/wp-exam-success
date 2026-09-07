@@ -35,6 +35,8 @@ class WPES_Admin {
 		add_action( 'wp_ajax_wpes_datatable_sessions', array( __CLASS__, 'ajax_datatable_sessions' ) );
 		add_action( 'wp_ajax_wpes_datatable_bookings', array( __CLASS__, 'ajax_datatable_bookings' ) );
 		add_action( 'wp_ajax_wpes_datatable_waitlist', array( __CLASS__, 'ajax_datatable_waitlist' ) );
+		add_action( 'wp_ajax_wpes_datatable_teacher_invites', array( __CLASS__, 'ajax_datatable_teacher_invites' ) );
+		add_action( 'wp_ajax_wpes_datatable_credits', array( __CLASS__, 'ajax_datatable_credits' ) );
 		add_action( 'wp_ajax_wpes_waitlist_send_message', array( __CLASS__, 'ajax_waitlist_send_message' ) );
 		add_action( 'wp_ajax_wpes_waitlist_delete', array( __CLASS__, 'ajax_waitlist_delete' ) );
 		add_action( 'wp_ajax_wpes_get_session', array( __CLASS__, 'ajax_get_session' ) );
@@ -54,8 +56,10 @@ class WPES_Admin {
 		add_submenu_page( 'wpes-dashboard', __( 'Dashboard', 'wp-exam-success' ), __( 'Dashboard', 'wp-exam-success' ), self::CAP, 'wpes-dashboard', array( __CLASS__, 'render_dashboard' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Classes', 'wp-exam-success' ), __( 'Classes', 'wp-exam-success' ), self::CAP, 'wpes-classes', array( __CLASS__, 'render_classes' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Teachers', 'wp-exam-success' ), __( 'Teachers', 'wp-exam-success' ), self::CAP, 'wpes-teachers', array( __CLASS__, 'render_teachers' ) );
+		add_submenu_page( 'wpes-dashboard', __( 'Teacher Invites', 'wp-exam-success' ), __( 'Teacher Invites', 'wp-exam-success' ), self::CAP, 'wpes-teacher-invites', array( __CLASS__, 'render_teacher_invites' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Sessions', 'wp-exam-success' ), __( 'Sessions', 'wp-exam-success' ), self::CAP, 'wpes-sessions', array( __CLASS__, 'render_sessions' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Bookings & Reporting', 'wp-exam-success' ), __( 'Bookings & Reporting', 'wp-exam-success' ), self::CAP, 'wpes-bookings', array( __CLASS__, 'render_bookings' ) );
+		add_submenu_page( 'wpes-dashboard', __( 'Replacement Credits', 'wp-exam-success' ), __( 'Replacement Credits', 'wp-exam-success' ), self::CAP, 'wpes-credits', array( __CLASS__, 'render_credits' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Waitlist', 'wp-exam-success' ), __( 'Waitlist', 'wp-exam-success' ), self::CAP, 'wpes-waitlist', array( __CLASS__, 'render_waitlist' ) );
 		add_submenu_page( 'wpes-dashboard', __( 'Settings', 'wp-exam-success' ), __( 'Settings', 'wp-exam-success' ), self::CAP, 'wpes-settings', array( __CLASS__, 'render_settings' ) );
 	}
@@ -165,6 +169,20 @@ class WPES_Admin {
 		WPES_Waitlist::ensure_table();
 		$form_names = WPES_Waitlist::get_form_names();
 		include WPES_PLUGIN_DIR . 'admin/views/waitlist.php';
+	}
+
+	public static function render_teacher_invites() {
+		if ( ! current_user_can( self::CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
+		}
+		include WPES_PLUGIN_DIR . 'admin/views/teacher-invites.php';
+	}
+
+	public static function render_credits() {
+		if ( ! current_user_can( self::CAP ) ) {
+			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
+		}
+		include WPES_PLUGIN_DIR . 'admin/views/credits.php';
 	}
 
 	public static function render_settings() {
@@ -903,6 +921,109 @@ class WPES_Admin {
 				esc_html( get_date_from_gmt( $entry->created_at, 'M j, Y g:i A' ) ),
 				$notified_cell,
 				$actions,
+			);
+		}
+
+		wp_send_json(
+			array(
+				'draw'            => $draw,
+				'recordsTotal'    => $total,
+				'recordsFiltered' => $total,
+				'data'            => $data,
+			)
+		);
+	}
+
+	public static function ajax_datatable_teacher_invites() {
+		self::verify_request();
+		$draw   = (int) ( $_POST['draw'] ?? 1 );
+		$start  = (int) ( $_POST['start'] ?? 0 );
+		$length = max( 1, (int) ( $_POST['length'] ?? 25 ) );
+		$search = sanitize_text_field( wp_unslash( $_POST['search']['value'] ?? '' ) );
+		$status = sanitize_key( $_POST['status_filter'] ?? '' );
+		$page   = (int) floor( $start / $length ) + 1;
+
+		$args = array(
+			'search'   => $search,
+			'status'   => $status,
+			'per_page' => $length,
+			'page'     => $page,
+		);
+
+		$total   = WPES_Teacher_Invites::count_query( $search, $status );
+		$invites = WPES_Teacher_Invites::query( $args );
+		$data    = array();
+
+		$badges = array(
+			'pending'    => 'bg-warning text-dark',
+			'accepted'   => 'bg-success',
+			'expired'    => 'bg-secondary',
+			'superseded' => 'bg-secondary',
+		);
+
+		foreach ( $invites as $invite ) {
+			$session_label = trim( ( $invite->class_name ? $invite->class_name . ' — ' : '' ) . ( $invite->session_title ?: __( '(untitled session)', 'wp-exam-success' ) ) );
+			$badge         = $badges[ $invite->status ] ?? 'bg-secondary';
+
+			$data[] = array(
+				esc_html( $session_label ) . '<div class="small text-muted">' . esc_html( get_date_from_gmt( $invite->session_starts_at_gmt, 'M j, Y g:i A' ) ) . '</div>',
+				esc_html( $invite->teacher_name ) . '<div class="small text-muted">' . esc_html( $invite->teacher_email ) . '</div>',
+				'<span class="badge ' . esc_attr( $badge ) . '">' . esc_html( ucfirst( $invite->status ) ) . '</span>',
+				esc_html( get_date_from_gmt( $invite->created_at, 'M j, Y g:i A' ) ),
+				esc_html( get_date_from_gmt( $invite->expires_at, 'M j, Y g:i A' ) ),
+				! empty( $invite->responded_at ) ? esc_html( get_date_from_gmt( $invite->responded_at, 'M j, Y g:i A' ) ) : '—',
+			);
+		}
+
+		wp_send_json(
+			array(
+				'draw'            => $draw,
+				'recordsTotal'    => $total,
+				'recordsFiltered' => $total,
+				'data'            => $data,
+			)
+		);
+	}
+
+	public static function ajax_datatable_credits() {
+		self::verify_request();
+		$draw   = (int) ( $_POST['draw'] ?? 1 );
+		$start  = (int) ( $_POST['start'] ?? 0 );
+		$length = max( 1, (int) ( $_POST['length'] ?? 25 ) );
+		$search = sanitize_text_field( wp_unslash( $_POST['search']['value'] ?? '' ) );
+		$status = sanitize_key( $_POST['status_filter'] ?? '' );
+		$page   = (int) floor( $start / $length ) + 1;
+
+		$args = array(
+			'search'   => $search,
+			'status'   => $status,
+			'per_page' => $length,
+			'page'     => $page,
+		);
+
+		$total   = WPES_Replacements::count_query( $search, $status );
+		$credits = WPES_Replacements::query( $args );
+		$data    = array();
+
+		foreach ( $credits as $credit ) {
+			$source_label = trim( ( $credit->source_class_name ? $credit->source_class_name . ' — ' : '' ) . ( $credit->source_title ?: '' ) );
+			$source_cell  = $source_label
+				? esc_html( $source_label ) . '<div class="small text-muted">' . esc_html( get_date_from_gmt( $credit->source_starts_at_gmt, 'M j, Y g:i A' ) ) . '</div>'
+				: '—';
+
+			if ( 'used' === $credit->status && ! empty( $credit->used_session_id ) ) {
+				$used_label  = trim( ( $credit->used_class_name ? $credit->used_class_name . ' — ' : '' ) . ( $credit->used_title ?: '' ) );
+				$redeemed_for = esc_html( $used_label ) . '<div class="small text-muted">' . esc_html( get_date_from_gmt( $credit->used_starts_at_gmt, 'M j, Y g:i A' ) ) . '</div>';
+			} else {
+				$redeemed_for = '<span class="text-muted">' . esc_html__( 'Not yet redeemed', 'wp-exam-success' ) . '</span>';
+			}
+
+			$data[] = array(
+				esc_html( $credit->customer_name ?: '—' ) . '<div class="small text-muted">' . esc_html( $credit->customer_email ) . '</div>',
+				$source_cell,
+				'<span class="badge bg-' . ( 'available' === $credit->status ? 'success' : 'secondary' ) . '">' . esc_html( ucfirst( $credit->status ) ) . '</span>',
+				esc_html( get_date_from_gmt( $credit->created_at, 'M j, Y g:i A' ) ),
+				$redeemed_for,
 			);
 		}
 

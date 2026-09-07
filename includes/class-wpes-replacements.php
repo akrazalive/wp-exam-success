@@ -186,4 +186,83 @@ class WPES_Replacements {
 
 		return $booking_id;
 	}
+
+	/**
+	 * Count credits matching filters (for the admin DataTable).
+	 *
+	 * @param string $search
+	 * @param string $status
+	 * @return int
+	 */
+	public static function count_query( $search = '', $status = '' ) {
+		global $wpdb;
+		list( $where_sql, $params ) = self::build_where( $search, $status );
+		$table = WPES_DB::replacement_credits_table();
+		$sql   = "SELECT COUNT(*) FROM {$table} rc WHERE {$where_sql}";
+
+		if ( empty( $params ) ) {
+			return (int) $wpdb->get_var( $sql );
+		}
+		return (int) $wpdb->get_var( $wpdb->prepare( $sql, $params ) );
+	}
+
+	/**
+	 * List every replacement credit (available and used) for the admin
+	 * "Replacement Credits" screen — previously only visible one customer
+	 * at a time via My Account, or by inspecting the DB directly.
+	 *
+	 * @param array $args { search, status, per_page, page }
+	 * @return object[]
+	 */
+	public static function query( array $args = array() ) {
+		global $wpdb;
+		list( $where_sql, $params ) = self::build_where( $args['search'] ?? '', $args['status'] ?? '' );
+
+		$per_page = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 25;
+		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
+		$offset   = ( $page - 1 ) * $per_page;
+
+		$credits_table  = WPES_DB::replacement_credits_table();
+		$sessions_table = WPES_DB::sessions_table();
+		$classes_table  = WPES_DB::classes_table();
+
+		$sql = "SELECT rc.*,
+				src.title AS source_title, src.starts_at_gmt AS source_starts_at_gmt, src_c.name AS source_class_name,
+				used.title AS used_title, used.starts_at_gmt AS used_starts_at_gmt, used_c.name AS used_class_name
+			FROM {$credits_table} rc
+			LEFT JOIN {$sessions_table} src ON src.id = rc.source_session_id
+			LEFT JOIN {$classes_table} src_c ON src_c.id = src.class_id
+			LEFT JOIN {$sessions_table} used ON used.id = rc.used_session_id
+			LEFT JOIN {$classes_table} used_c ON used_c.id = used.class_id
+			WHERE {$where_sql}
+			ORDER BY rc.created_at DESC
+			LIMIT %d OFFSET %d";
+
+		$params[] = $per_page;
+		$params[] = $offset;
+
+		return $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
+	}
+
+	/**
+	 * @return array{0:string,1:array}
+	 */
+	protected static function build_where( $search, $status ) {
+		global $wpdb;
+		$where  = array( '1=1' );
+		$params = array();
+
+		if ( '' !== $status ) {
+			$where[]  = 'rc.status = %s';
+			$params[] = sanitize_key( $status );
+		}
+		if ( '' !== $search ) {
+			$where[]  = '(rc.customer_name LIKE %s OR rc.customer_email LIKE %s)';
+			$like     = '%' . $wpdb->esc_like( $search ) . '%';
+			$params[] = $like;
+			$params[] = $like;
+		}
+
+		return array( implode( ' AND ', $where ), $params );
+	}
 }

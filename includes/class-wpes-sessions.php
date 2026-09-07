@@ -490,4 +490,35 @@ class WPES_Sessions {
 
 		return max( 0, (int) $row->max_attendees - (int) $row->booked );
 	}
+
+	/**
+	 * Count upcoming, still-scheduled sessions whose confirmed attendee
+	 * count has not yet reached the minimum participant setting —
+	 * dashboard "at a glance" stat for the Developer Spec §9 minimum
+	 * check. Mirrors the same 'confirmed' definition
+	 * WPES_Teacher_Invites::count_confirmed_attendees() uses.
+	 *
+	 * @param int $min_participants
+	 * @return int
+	 */
+	public static function count_below_minimum( $min_participants ) {
+		global $wpdb;
+		$sessions_table = WPES_DB::sessions_table();
+		$bookings_table = WPES_DB::bookings_table();
+
+		$sql = "SELECT COUNT(*) FROM (
+				SELECT s.id, COALESCE(b.confirmed_count, 0) AS confirmed_count
+				FROM {$sessions_table} s
+				LEFT JOIN (
+					SELECT session_id, COUNT(*) AS confirmed_count
+					FROM {$bookings_table}
+					WHERE status = 'confirmed'
+					GROUP BY session_id
+				) b ON b.session_id = s.id
+				WHERE s.status = 'scheduled' AND s.starts_at_gmt >= %s
+			) below
+			WHERE below.confirmed_count < %d";
+
+		return (int) $wpdb->get_var( $wpdb->prepare( $sql, WPES_DB::now_gmt(), max( 1, (int) $min_participants ) ) );
+	}
 }
