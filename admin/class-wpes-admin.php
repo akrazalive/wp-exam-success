@@ -236,12 +236,19 @@ class WPES_Admin {
 		}
 
 		if ( isset( $_POST['booking'] ) ) {
-			$posted  = (array) $_POST['booking'];
-			$booking = array(
+			$posted        = (array) $_POST['booking'];
+			$notify_email  = isset( $posted['admin_notification_email'] ) ? sanitize_email( wp_unslash( $posted['admin_notification_email'] ) ) : '';
+			$booking       = array(
 				'min_participants'          => max( 1, (int) ( $posted['min_participants'] ?? 5 ) ),
 				'auto_teacher_assignment'   => ! empty( $posted['auto_teacher_assignment'] ),
 				'teacher_invite_hours'      => max( 1, (int) ( $posted['teacher_invite_hours'] ?? 4 ) ),
 				'final_check_hours_before'  => max( 1, (int) ( $posted['final_check_hours_before'] ?? 24 ) ),
+				// Empty/invalid input is stored as '' (falls back to the
+				// site's normal admin_email at send time) rather than
+				// silently keeping a stale address — same "blank resets
+				// to the default" behaviour as the email/status-message
+				// template fields below.
+				'admin_notification_email' => is_email( $notify_email ) ? $notify_email : '',
 			);
 			update_option( 'wpes_booking_settings', $booking, false );
 		}
@@ -300,6 +307,7 @@ class WPES_Admin {
 			'auto_teacher_assignment'  => true,
 			'teacher_invite_hours'     => 4,
 			'final_check_hours_before' => 24,
+			'admin_notification_email' => '',
 		);
 		$saved = get_option( 'wpes_booking_settings', array() );
 		if ( ! is_array( $saved ) ) {
@@ -313,6 +321,7 @@ class WPES_Admin {
 		$out['auto_teacher_assignment']  = (bool) $out['auto_teacher_assignment'];
 		$out['teacher_invite_hours']     = max( 1, (int) $out['teacher_invite_hours'] );
 		$out['final_check_hours_before'] = max( 1, (int) $out['final_check_hours_before'] );
+		$out['admin_notification_email'] = is_email( $out['admin_notification_email'] ) ? $out['admin_notification_email'] : '';
 		return $out;
 	}
 

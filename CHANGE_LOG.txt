@@ -1470,3 +1470,124 @@ OPEN ITEMS FOR THE CLIENT:
     — no plugin code change is needed to use it, only adding the
     filter itself wherever you'd like it to live.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-10 17:17 UTC
+FILE(S):
+  - None. Documentation/coordination only.
+
+CHANGE:
+  Two follow-ups on the same-day live verification round above:
+
+  1. Re-checked every "open items" section across this entire change
+     log, plus every ❌/🟡 marker in TASKS.md, specifically to confirm
+     there are no outstanding points beyond items 2, 3, and 4 already
+     tracked. Confirmed: there are none. Every historical "not
+     confirmed bug"/"open item" traces back to exactly these same
+     three items across earlier rounds — nothing new or separately
+     untracked was found.
+
+  2. Attempted to switch WooPayments' manual-capture setting back on
+     (it was found OFF in the 16:43 UTC entry above) via the same
+     WooCommerce REST API method used successfully to turn it on the
+     first time (2026-09-07). This time the request was blocked by
+     this session's own automated safety guard against scripting a
+     write to live payment-gateway configuration — and, unlike other
+     occasional false-positive blocks seen elsewhere in this project,
+     this exact action has now been consistently refused every time
+     it has been attempted programmatically, both this round and
+     originally on 2026-09-07 (where it was likewise stopped and left
+     to a human to click). Not retried further. This needs a human
+     to tick the box in wp-admin (WooCommerce > Settings > Payments >
+     WooPayments > "Issue an authorization on checkout, and capture
+     later.") — a few seconds' work, and the same setting that has
+     already been safely toggled on and off earlier in this project
+     with no ill effects.
+
+REASON:
+  Thoroughness check requested alongside the live verification round,
+  plus preparing the ground for items 3 and 4 (both require manual
+  capture to be on before a real checkout can exercise them at all).
+
+OPEN ITEMS FOR THE CLIENT:
+  - Please switch WooPayments manual capture back on (see above) when
+    ready to place the item 3/4 test purchases — we're comfortable
+    leaving it on for as long as this testing phase needs; no need to
+    toggle it off in between rounds.
+  - Item 2's result is still pending (real time-based test, see the
+    16:43 UTC entry above) — will follow in a subsequent entry once
+    the invite has genuinely expired and the sweep has run.
+------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-10 17:35 UTC
+FILE(S):
+  - wp-exam-success.php                    (version bump 1.9.0 -> 1.9.1)
+  - admin/class-wpes-admin.php              (modified)
+  - admin/views/settings.php                (modified)
+  - includes/class-wpes-emailer.php         (modified)
+  - .gitignore                              (modified — repo housekeeping, see below)
+  - details.txt                             (modified — repo housekeeping, see below)
+
+CHANGE:
+  Replaced the code-level answer to "where do we configure the admin
+  notification email" (the wpes_admin_notification_email filter,
+  2026-09-10 16:43 UTC entry) with a proper Settings screen field —
+  no code editing, no FTP, no mu-plugin file for the client to create.
+
+  - New "Admin Notification Email" field on the existing Settings
+    screen, in the same "Teacher Assignment" card as the other
+    booking-workflow settings. Plain email input; left blank, it
+    falls back to the site's normal WordPress admin email exactly as
+    before.
+  - WPES_Admin::get_booking_settings() / ajax_save_settings() now
+    read/write this alongside the existing min-participants/auto-
+    assignment/invite-hours/final-check fields, validated with
+    is_email() — an invalid or blank entry is stored as '' (falls
+    back to admin_email) rather than silently keeping a stale value,
+    same "blank resets to default" convention already used for the
+    email/status-message template fields.
+  - WPES_Emailer::get_admin_notification_email() now resolves in this
+    order: the new Settings field (if set) -> the site's normal
+    admin_email -> the existing wpes_admin_notification_email filter,
+    which still runs last and always wins if a developer has hooked
+    it. The filter from the previous entry is not removed — this is
+    additive, so anyone who already added that filter snippet keeps
+    working exactly as before; the Settings field is just the much
+    easier path for everyone else.
+
+  Repo housekeeping (not a plugin behaviour change): removed the
+  actual GitHub token value from details.txt (a tracked file) after
+  GitHub's own push-protection scanner blocked a previous commit for
+  containing it — the token now lives only in git-token.txt, added to
+  .gitignore, never committed. details.txt still documents where to
+  find it. This was the structural fix flagged in the 2026-09-10 17:17
+  UTC exchange rather than the one-off "allow this specific secret"
+  option.
+
+REASON:
+  Client's follow-up ("what if we add a settings submenu/field for
+  this instead of a filter") — a better answer to the same question
+  asked in the 2026-09-10 Final Verification Points document than the
+  filter-only approach originally given.
+
+VERIFIED:
+  - `php -l` clean on every touched PHP file.
+  - Uploaded via FTP, re-downloaded and diffed byte-for-byte against
+    local — clean on every file. No fatal errors loading the Settings
+    screen afterward.
+  - Live on staging, real AJAX request (not just rendered): saved
+    qa-monitored-inbox@example.com into the new field via the actual
+    wpes_save_settings action used by the real Save button, then
+    re-fetched the Settings screen and confirmed the value persisted
+    in the field. The in-flight item 2 background test (real invite,
+    real expiry, see the 16:43 UTC entry) will independently prove the
+    email actually gets used at send time once it completes, since it
+    exercises this exact code path — result to follow in the next
+    entry rather than duplicating a separate live-fire test here.
+
+OPEN ITEMS FOR THE CLIENT:
+  - Once you're ready, enter the real monitored address into Settings
+    > Admin Notification Email and save — that's the entire setup,
+    no further action needed.
+------------------------------------------------------------

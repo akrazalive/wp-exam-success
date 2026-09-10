@@ -124,6 +124,12 @@ $labels = array(
 						<div class="form-text"><?php esc_html_e( 'A last automatic check of the minimum-participant/teacher status this many hours before a session starts.', 'wp-exam-success' ); ?></div>
 					</div>
 
+					<div class="mb-3">
+						<label class="form-label" for="wpesAdminNotificationEmail"><?php esc_html_e( 'Admin Notification Email', 'wp-exam-success' ); ?></label>
+						<input type="email" class="form-control" style="max-width: 320px;" id="wpesAdminNotificationEmail" name="booking[admin_notification_email]" value="<?php echo esc_attr( $booking['admin_notification_email'] ); ?>" placeholder="e.g. bookings@yourcompany.com" />
+						<div class="form-text"><?php esc_html_e( 'Where "no teacher responded" and "payment capture failed" alerts are sent. Leave blank to use this site\'s normal WordPress admin email instead.', 'wp-exam-success' ); ?></div>
+					</div>
+
 					<button type="submit" class="btn btn-primary" id="wpesBookingSettingsSaveBtn">
 						<?php esc_html_e( 'Save Settings', 'wp-exam-success' ); ?>
 					</button>

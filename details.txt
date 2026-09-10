@@ -20,4 +20,7 @@ user : akrazalive@gmail.com
 pwd  : Codeplayer123!
 
 git token
-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
+(kept out of this tracked file since 2026-09-10 — GitHub's own push
+protection blocks any commit containing a live token, and this file
+gets committed to the repo. Current token is in git-token.txt in this
+same folder, which is listed in .gitignore and never gets pushed.)

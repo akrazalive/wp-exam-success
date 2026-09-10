@@ -267,18 +267,30 @@ class WPES_Emailer {
 	 * Recipient for every WP Exam Success admin/operational alert
 	 * (no-teacher-response, capture-failed, etc.). Defaults to the site's
 	 * "Administration Email Address" the same way this always has, but is
-	 * now explicitly filterable — found during Final Acceptance Testing
-	 * (item 2, 2026-09-10) that staging's admin_email is a generic
-	 * placeholder inbox (contact@staging.exam-success.de) nobody actually
-	 * monitors, which looks identical to "the notification was never
-	 * sent" from the outside. wp_mail() itself was never the problem;
-	 * this just lets the destination be pointed wherever someone is
-	 * actually watching, on staging or live, without editing code.
+	 * now configurable — found during Final Acceptance Testing (item 2,
+	 * 2026-09-10) that staging's admin_email is a generic placeholder
+	 * inbox (contact@staging.exam-success.de) nobody actually monitors,
+	 * which looks identical to "the notification was never sent" from
+	 * the outside. wp_mail() itself was never the problem; this just
+	 * lets the destination be pointed wherever someone is actually
+	 * watching, on staging or live, without editing code.
+	 *
+	 * Resolution order: the "Admin Notification Email" field on the
+	 * Settings screen (WPES_Admin::get_booking_settings()) if one has
+	 * been entered there; otherwise the site's normal admin_email. The
+	 * wpes_admin_notification_email filter this originally shipped with
+	 * (2026-09-10, before the Settings field existed) still runs last
+	 * and always wins if a developer has hooked it — kept for backward
+	 * compatibility and for anyone who genuinely prefers a code-level
+	 * override over the UI field.
 	 *
 	 * @return string
 	 */
 	public static function get_admin_notification_email() {
-		return apply_filters( 'wpes_admin_notification_email', get_option( 'admin_email' ) );
+		$settings = class_exists( 'WPES_Admin' ) ? WPES_Admin::get_booking_settings() : array();
+		$base     = ! empty( $settings['admin_notification_email'] ) ? $settings['admin_notification_email'] : get_option( 'admin_email' );
+
+		return apply_filters( 'wpes_admin_notification_email', $base );
 	}
 
 	/**
