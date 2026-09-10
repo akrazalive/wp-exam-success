@@ -1591,3 +1591,56 @@ OPEN ITEMS FOR THE CLIENT:
     > Admin Notification Email and save — that's the entire setup,
     no further action needed.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-10 17:47 UTC
+FILE(S):
+  - None. This entry records the completed result of the item 2 test
+    started in the 16:43 UTC entry above.
+
+CHANGE:
+  Item 2 (Admin Notification after Invitation Expiry) — COMPLETE, and
+  proves the new Settings field (17:35 UTC entry) end-to-end at the
+  same time. The real 1-hour test invite created in the 16:43 UTC
+  entry genuinely expired at 17:43:11 UTC. wp-cron.php was triggered
+  immediately after, running the existing expiry-sweep cron for real.
+
+  Result, checked directly in the mail log:
+  - A new email fired at the exact right moment: "Action required: no
+    teacher assigned — QA Expiry-Notification Test (delete me)".
+  - Its recipient: qa-monitored-inbox@example.com — the exact test
+    address saved into the new "Admin Notification Email" Settings
+    field earlier in this session, NOT the generic staging placeholder
+    inbox. This is the real, live proof (not just "it saves") that the
+    new field genuinely controls where this alert goes.
+  - The test session itself correctly remained "Unassigned" — nobody
+    ever accepted the invite, so nothing was confirmed, exactly as
+    expected.
+
+  Both the test session and the test email address were cleaned up
+  immediately after: session archived, and the Admin Notification
+  Email field reset back to blank (its default, falling back to the
+  normal WP admin email) so the client's own real address is what
+  actually gets saved there next.
+
+REASON:
+  Completes the item 2 verification requested in the client's Final
+  Verification Points document (2026-09-10), and closes the loop on
+  the "provide the exact location for this email address" question
+  from the same document with a real, working, end-to-end proof rather
+  than just a code-level claim.
+
+VERIFIED:
+  - Confirmed directly via WP Mail Logging's own recorded recipient
+    and subject for the actual email that was sent — not inferred,
+    not assumed.
+  - Confirmed the session's admin listing showed "Unassigned"
+    afterward — no invalid confirmation occurred.
+
+OPEN ITEMS FOR THE CLIENT:
+  - None remaining for item 2 — fully verified and closed.
+  - Items 3 and 4 remain the only outstanding points from the Final
+    Verification Points document (need manual capture switched back
+    on, then one or two real test-mode checkouts — see the 17:17 and
+    16:43 UTC entries above for exact detail).
+------------------------------------------------------------
