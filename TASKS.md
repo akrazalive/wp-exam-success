@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-07 (latest: booking edge-case fixes, see below)
+**Last updated:** 2026-09-10 (latest: Final Acceptance Testing — Remaining Issues, see below)
 
 ## Legend
 
@@ -25,6 +25,23 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Final Acceptance Testing — Remaining Issues (2026-09-10)
+
+Client's formal "WP Exam Success – Final Acceptance Testing – Remaining Issues" document listed 4 confirmed issues to fix and 4 "not confirmed bugs" explicitly marked as verification-only / not required. Full detail in `CHANGE_LOG.txt`'s 2026-09-10 entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Superseded Teacher Invitation shows wrong error message | ✅ fixed — `handle_accept()` now branches on the invite's actual status instead of only matching `pending`; verified by code review against the live invite/status data on staging |
+| 2 | No admin notification after all Teacher Invitations expire | ✅ improved — added `wpes_admin_notification_email` filter so alerts can be redirected off the generic staging placeholder inbox; not reproducible live within one session (needs a real multi-hour expiry wait) |
+| 3 | Replacement Credits dropdown contained invalid/ineligible sessions (client examples: "TESTX B", "TESTX D") | ✅ fixed — added `from_gmt` lower-bound to the replacement-session query; both named sessions (#44, #47) also cancelled directly on staging, verified live |
+| 4a/4b | Emails & Accept-Link status messages hardcoded in PHP | ✅ built — new "Email & Message Templates" Settings card covering all 5 emails + 4 status messages, with token substitution; verified live end-to-end (saved a real value via AJAX, confirmed it rendered on the actual public Accept-Link page, then reverted) |
+
+Not confirmed bugs (explicitly not required, untouched this round): Payment Capture Failure (no live test done), Fresh On-Hold End-to-End Workflow, Participant Loss Before Teacher Acceptance, Full-Capacity Replacement.
+
+Version bumped 1.8.4 → 1.9.0 (no schema change).
 
 ---
 

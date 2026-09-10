@@ -154,32 +154,21 @@ class WPES_Emailer {
 		$title      = $session->title ?: $class_name;
 		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
 
-		$body  = '<p>' . sprintf(
-			/* translators: %s: teacher name */
-			esc_html__( 'Hi %s,', 'wp-exam-success' ),
-			esc_html( $teacher->name )
-		) . '</p>';
-		$body .= '<p>' . sprintf(
-			/* translators: 1: class/session title, 2: date and time */
-			esc_html__( 'A session for %1$s has reached its minimum number of participants and needs a teacher: %2$s.', 'wp-exam-success' ),
-			esc_html( $title ),
-			esc_html( $when )
-		) . '</p>';
-		$body .= '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $accept_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Accept This Session', 'wp-exam-success' ) . '</a></p>';
-		$body .= '<p style="font-size:13px;color:#666;">' . sprintf(
-			/* translators: %d: number of hours */
-			esc_html__( 'This invitation was also sent to other suitable teachers — whoever accepts first is assigned. It expires in %d hours.', 'wp-exam-success' ),
-			(int) $valid_hours
-		) . '</p>';
+		$tpl           = WPES_Admin::get_email_templates()['teacher_invite'];
+		$accept_button = '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $accept_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Accept This Session', 'wp-exam-success' ) . '</a></p>';
+
+		$tokens = array(
+			'{teacher_name}'     => esc_html( $teacher->name ),
+			'{session_title}'    => esc_html( $title ),
+			'{session_datetime}' => esc_html( $when ),
+			'{invite_hours}'     => (int) $valid_hours,
+			'{accept_button}'    => $accept_button,
+		);
 
 		return self::send(
 			$teacher->email,
-			sprintf(
-				/* translators: %s: class/session title */
-				__( 'Session invitation — %s', 'wp-exam-success' ),
-				$title
-			),
-			$body
+			strtr( $tpl['subject'], $tokens ),
+			strtr( $tpl['body'], $tokens )
 		);
 	}
 
@@ -208,33 +197,26 @@ class WPES_Emailer {
 		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
 		$sent       = 0;
 
+		$tpl          = WPES_Admin::get_email_templates()['session_confirmed'];
+		$account_link = '<a href="' . esc_url( wc_get_page_permalink( 'myaccount' ) ) . '" style="color:#2563eb;">' . esc_html__( 'View your sessions dashboard', 'wp-exam-success' ) . '</a>';
+
 		foreach ( $attendees as $attendee ) {
 			if ( empty( $attendee->customer_email ) ) {
 				continue;
 			}
 
-			$body  = '<p>' . sprintf(
-				/* translators: %s: customer name */
-				esc_html__( 'Hi %s,', 'wp-exam-success' ),
-				esc_html( $attendee->customer_name ?: __( 'there', 'wp-exam-success' ) )
-			) . '</p>';
-			$body .= '<p>' . sprintf(
-				/* translators: 1: session/class title, 2: date and time, 3: teacher name */
-				esc_html__( 'Good news — your session for %1$s on %2$s is confirmed, with %3$s as your teacher.', 'wp-exam-success' ),
-				esc_html( $title ),
-				esc_html( $when ),
-				esc_html( $teacher->name )
-			) . '</p>';
-			$body .= '<p style="margin-top:24px;"><a href="' . esc_url( wc_get_page_permalink( 'myaccount' ) ) . '" style="color:#2563eb;">' . esc_html__( 'View your sessions dashboard', 'wp-exam-success' ) . '</a></p>';
+			$tokens = array(
+				'{customer_name}'    => esc_html( $attendee->customer_name ?: __( 'there', 'wp-exam-success' ) ),
+				'{session_title}'    => esc_html( $title ),
+				'{session_datetime}' => esc_html( $when ),
+				'{teacher_name}'     => esc_html( $teacher->name ),
+				'{account_link}'     => $account_link,
+			);
 
 			if ( self::send(
 				$attendee->customer_email,
-				sprintf(
-					/* translators: %s: session/class title */
-					__( 'Your session is confirmed — %s', 'wp-exam-success' ),
-					$title
-				),
-				$body
+				strtr( $tpl['subject'], $tokens ),
+				strtr( $tpl['body'], $tokens )
 			) ) {
 				$sent++;
 			}
@@ -259,35 +241,44 @@ class WPES_Emailer {
 			return false;
 		}
 
-		$class_name = $class ? $class->name : __( 'your class', 'wp-exam-success' );
-		$title      = $session->title ?: $class_name;
-		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
+		$class_name  = $class ? $class->name : __( 'your class', 'wp-exam-success' );
+		$title       = $session->title ?: $class_name;
+		$when        = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
 		$account_url = wc_get_page_permalink( 'myaccount' );
 
-		$body  = '<p>' . sprintf(
-			/* translators: %s: customer name */
-			esc_html__( 'Hi %s,', 'wp-exam-success' ),
-			esc_html( $booking->customer_name ?: __( 'there', 'wp-exam-success' ) )
-		) . '</p>';
-		$body .= '<p>' . sprintf(
-			/* translators: 1: session/class title, 2: date and time */
-			esc_html__( 'Unfortunately your session for %1$s on %2$s did not reach the minimum number of participants and will not take place.', 'wp-exam-success' ),
-			esc_html( $title ),
-			esc_html( $when )
-		) . '</p>';
-		$body .= '<p>' . esc_html__( 'No further action is needed on your part regarding payment — this session is covered by the package you already purchased, and you have not been charged separately for it.', 'wp-exam-success' ) . '</p>';
-		$body .= '<p><strong>' . esc_html__( 'You have 1 replacement credit available.', 'wp-exam-success' ) . '</strong> ' . esc_html__( 'Use it to pick a different session at no additional cost.', 'wp-exam-success' ) . '</p>';
-		$body .= '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $account_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Choose a Replacement Session', 'wp-exam-success' ) . '</a></p>';
+		$tpl                = WPES_Admin::get_email_templates()['session_cancelled_replacement'];
+		$replacement_button = '<p style="text-align:center;margin:28px 0;"><a href="' . esc_url( $account_url ) . '" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;">' . esc_html__( 'Choose a Replacement Session', 'wp-exam-success' ) . '</a></p>';
+
+		$tokens = array(
+			'{customer_name}'     => esc_html( $booking->customer_name ?: __( 'there', 'wp-exam-success' ) ),
+			'{session_title}'     => esc_html( $title ),
+			'{session_datetime}'  => esc_html( $when ),
+			'{replacement_button}' => $replacement_button,
+		);
 
 		return self::send(
 			$booking->customer_email,
-			sprintf(
-				/* translators: %s: session/class title */
-				__( 'Session cancelled — replacement available for %s', 'wp-exam-success' ),
-				$title
-			),
-			$body
+			strtr( $tpl['subject'], $tokens ),
+			strtr( $tpl['body'], $tokens )
 		);
+	}
+
+	/**
+	 * Recipient for every WP Exam Success admin/operational alert
+	 * (no-teacher-response, capture-failed, etc.). Defaults to the site's
+	 * "Administration Email Address" the same way this always has, but is
+	 * now explicitly filterable — found during Final Acceptance Testing
+	 * (item 2, 2026-09-10) that staging's admin_email is a generic
+	 * placeholder inbox (contact@staging.exam-success.de) nobody actually
+	 * monitors, which looks identical to "the notification was never
+	 * sent" from the outside. wp_mail() itself was never the problem;
+	 * this just lets the destination be pointed wherever someone is
+	 * actually watching, on staging or live, without editing code.
+	 *
+	 * @return string
+	 */
+	public static function get_admin_notification_email() {
+		return apply_filters( 'wpes_admin_notification_email', get_option( 'admin_email' ) );
 	}
 
 	/**
@@ -299,7 +290,7 @@ class WPES_Emailer {
 	 * @return bool
 	 */
 	public static function send_admin_no_teacher_response( $session, $class ) {
-		$admin_email = get_option( 'admin_email' );
+		$admin_email = self::get_admin_notification_email();
 		if ( ! $admin_email ) {
 			return false;
 		}
@@ -309,23 +300,19 @@ class WPES_Emailer {
 		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
 		$edit_url   = admin_url( 'admin.php?page=wpes-sessions' );
 
-		$body  = '<p>' . sprintf(
-			/* translators: 1: session/class title, 2: date and time */
-			esc_html__( 'No teacher accepted the invitation for %1$s on %2$s within the configured time window.', 'wp-exam-success' ),
-			esc_html( $title ),
-			esc_html( $when )
-		) . '</p>';
-		$body .= '<p>' . esc_html__( 'This session still has no assigned teacher and needs a manual decision.', 'wp-exam-success' ) . '</p>';
-		$body .= '<p style="margin-top:20px;"><a href="' . esc_url( $edit_url ) . '" style="color:#2563eb;">' . esc_html__( 'Assign a teacher manually', 'wp-exam-success' ) . '</a></p>';
+		$tpl         = WPES_Admin::get_email_templates()['admin_no_teacher_response'];
+		$assign_link = '<p style="margin-top:20px;"><a href="' . esc_url( $edit_url ) . '" style="color:#2563eb;">' . esc_html__( 'Assign a teacher manually', 'wp-exam-success' ) . '</a></p>';
+
+		$tokens = array(
+			'{session_title}'    => esc_html( $title ),
+			'{session_datetime}' => esc_html( $when ),
+			'{assign_link}'      => $assign_link,
+		);
 
 		return self::send(
 			$admin_email,
-			sprintf(
-				/* translators: %s: session/class title */
-				__( 'Action required: no teacher assigned — %s', 'wp-exam-success' ),
-				$title
-			),
-			$body
+			strtr( $tpl['subject'], $tokens ),
+			strtr( $tpl['body'], $tokens )
 		);
 	}
 
@@ -343,7 +330,7 @@ class WPES_Emailer {
 	 * @return bool
 	 */
 	public static function send_admin_capture_failed( $order_id, $session_id, $resulting_status ) {
-		$admin_email = get_option( 'admin_email' );
+		$admin_email = self::get_admin_notification_email();
 		if ( ! $admin_email ) {
 			return false;
 		}
@@ -352,28 +339,20 @@ class WPES_Emailer {
 			? $order->get_edit_order_url()
 			: admin_url( 'post.php?post=' . (int) $order_id . '&action=edit' );
 
-		$body  = '<p>' . sprintf(
-			/* translators: 1: order ID, 2: session ID */
-			esc_html__( 'WP Exam Success attempted to capture the pre-authorized package payment for order #%1$d after session #%2$d confirmed, but the capture did not complete.', 'wp-exam-success' ),
-			(int) $order_id,
-			(int) $session_id
-		) . '</p>';
-		$body .= '<p>' . sprintf(
-			/* translators: %s: order status */
-			esc_html__( 'The order\'s status after the attempt was "%s" instead of completed/processing.', 'wp-exam-success' ),
-			esc_html( $resulting_status )
-		) . '</p>';
-		$body .= '<p>' . esc_html__( 'No charge has been recorded internally, and the plugin will automatically retry the next time another session on this order is confirmed. If this keeps failing, please check the payment gateway directly (e.g. an expired authorization window).', 'wp-exam-success' ) . '</p>';
-		$body .= '<p style="margin-top:20px;"><a href="' . esc_url( $order_url ) . '" style="color:#2563eb;">' . esc_html__( 'View the order', 'wp-exam-success' ) . '</a></p>';
+		$tpl        = WPES_Admin::get_email_templates()['admin_capture_failed'];
+		$order_link = '<p style="margin-top:20px;"><a href="' . esc_url( $order_url ) . '" style="color:#2563eb;">' . esc_html__( 'View the order', 'wp-exam-success' ) . '</a></p>';
+
+		$tokens = array(
+			'{order_id}'     => (int) $order_id,
+			'{session_id}'   => (int) $session_id,
+			'{order_status}' => esc_html( $resulting_status ),
+			'{order_link}'   => $order_link,
+		);
 
 		return self::send(
 			$admin_email,
-			sprintf(
-				/* translators: %d: order ID */
-				__( 'Action required: payment capture failed — order #%d', 'wp-exam-success' ),
-				(int) $order_id
-			),
-			$body
+			strtr( $tpl['subject'], $tokens ),
+			strtr( $tpl['body'], $tokens )
 		);
 	}
 }

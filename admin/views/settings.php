@@ -4,6 +4,50 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 /** @var array<string,bool> $filters */
 /** @var array $booking */
+/** @var array $email_templates */
+/** @var array $status_messages */
+
+$email_items = array(
+	'teacher_invite'                => array(
+		'label'  => __( 'Teacher Invitation Email', 'wp-exam-success' ),
+		'tokens' => '{teacher_name}, {session_title}, {session_datetime}, {invite_hours}, {accept_button}',
+	),
+	'session_confirmed'             => array(
+		'label'  => __( 'Session Confirmed Email (to attendees)', 'wp-exam-success' ),
+		'tokens' => '{customer_name}, {session_title}, {session_datetime}, {teacher_name}, {account_link}',
+	),
+	'session_cancelled_replacement' => array(
+		'label'  => __( 'Session Cancelled / Replacement Credit Email', 'wp-exam-success' ),
+		'tokens' => '{customer_name}, {session_title}, {session_datetime}, {replacement_button}',
+	),
+	'admin_no_teacher_response'     => array(
+		'label'  => __( 'Admin Alert: No Teacher Responded', 'wp-exam-success' ),
+		'tokens' => '{session_title}, {session_datetime}, {assign_link}',
+	),
+	'admin_capture_failed'          => array(
+		'label'  => __( 'Admin Alert: Payment Capture Failed', 'wp-exam-success' ),
+		'tokens' => '{order_id}, {session_id}, {order_status}, {order_link}',
+	),
+);
+
+$message_items = array(
+	'teacher_accepted'              => array(
+		'label'  => __( 'Teacher Accept-Link: Success', 'wp-exam-success' ),
+		'tokens' => '{session_datetime}',
+	),
+	'teacher_already_assigned'      => array(
+		'label'  => __( 'Teacher Accept-Link: Already Assigned', 'wp-exam-success' ),
+		'tokens' => '{session_datetime}',
+	),
+	'teacher_minimum_no_longer_met' => array(
+		'label'  => __( 'Teacher Accept-Link: Minimum No Longer Met', 'wp-exam-success' ),
+		'tokens' => '{session_datetime}',
+	),
+	'teacher_link_invalid'          => array(
+		'label'  => __( 'Teacher Accept-Link: Invalid / Expired', 'wp-exam-success' ),
+		'tokens' => '{session_datetime}',
+	),
+);
 $labels = array(
 	'class_id'     => __( 'Skill', 'wp-exam-success' ),
 	'level'        => __( 'Level', 'wp-exam-success' ),
@@ -81,6 +125,61 @@ $labels = array(
 					</div>
 
 					<button type="submit" class="btn btn-primary" id="wpesBookingSettingsSaveBtn">
+						<?php esc_html_e( 'Save Settings', 'wp-exam-success' ); ?>
+					</button>
+				</form>
+			</div>
+		</div>
+
+		<div class="card shadow-sm mt-3" style="max-width: 900px;">
+			<div class="card-body">
+				<h2 class="h5 mb-2"><?php esc_html_e( 'Email & Message Templates', 'wp-exam-success' ); ?></h2>
+				<p class="text-muted small mb-3">
+					<?php esc_html_e( 'Subject/title and body text for every email and Accept-Link outcome page this plugin sends. Leave a field blank and save to reset it back to the default text shown below. Tokens like {session_title} are replaced automatically when the email/message is sent — text ending in _button or _link inserts the actual working button/link and cannot be typed by hand.', 'wp-exam-success' ); ?>
+				</p>
+
+				<form id="wpesMessageSettingsForm">
+					<h3 class="h6 mt-4 mb-3"><?php esc_html_e( 'Emails', 'wp-exam-success' ); ?></h3>
+					<?php foreach ( $email_items as $key => $item ) : ?>
+						<div class="border rounded p-3 mb-3">
+							<h4 class="h6 mb-2"><?php echo esc_html( $item['label'] ); ?></h4>
+							<div class="mb-2">
+								<label class="form-label small" for="wpesEmailSubject_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Subject', 'wp-exam-success' ); ?></label>
+								<input type="text" class="form-control form-control-sm" id="wpesEmailSubject_<?php echo esc_attr( $key ); ?>" name="email_templates[<?php echo esc_attr( $key ); ?>][subject]" value="<?php echo esc_attr( $email_templates[ $key ]['subject'] ); ?>" />
+							</div>
+							<div class="mb-1">
+								<label class="form-label small" for="wpesEmailBody_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Body (HTML allowed)', 'wp-exam-success' ); ?></label>
+								<textarea class="form-control form-control-sm" style="font-family:monospace;font-size:12px;" rows="4" id="wpesEmailBody_<?php echo esc_attr( $key ); ?>" name="email_templates[<?php echo esc_attr( $key ); ?>][body]"><?php echo esc_textarea( $email_templates[ $key ]['body'] ); ?></textarea>
+							</div>
+							<div class="form-text"><?php echo esc_html( sprintf(
+								/* translators: %s: comma-separated list of available tokens */
+								__( 'Available tokens: %s', 'wp-exam-success' ),
+								$item['tokens']
+							) ); ?></div>
+						</div>
+					<?php endforeach; ?>
+
+					<h3 class="h6 mt-4 mb-3"><?php esc_html_e( 'Teacher Accept-Link Response Pages', 'wp-exam-success' ); ?></h3>
+					<?php foreach ( $message_items as $key => $item ) : ?>
+						<div class="border rounded p-3 mb-3">
+							<h4 class="h6 mb-2"><?php echo esc_html( $item['label'] ); ?></h4>
+							<div class="mb-2">
+								<label class="form-label small" for="wpesMsgTitle_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Page Title', 'wp-exam-success' ); ?></label>
+								<input type="text" class="form-control form-control-sm" id="wpesMsgTitle_<?php echo esc_attr( $key ); ?>" name="status_messages[<?php echo esc_attr( $key ); ?>][title]" value="<?php echo esc_attr( $status_messages[ $key ]['title'] ); ?>" />
+							</div>
+							<div class="mb-1">
+								<label class="form-label small" for="wpesMsgBody_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Message', 'wp-exam-success' ); ?></label>
+								<textarea class="form-control form-control-sm" style="font-family:monospace;font-size:12px;" rows="2" id="wpesMsgBody_<?php echo esc_attr( $key ); ?>" name="status_messages[<?php echo esc_attr( $key ); ?>][body]"><?php echo esc_textarea( $status_messages[ $key ]['body'] ); ?></textarea>
+							</div>
+							<div class="form-text"><?php echo esc_html( sprintf(
+								/* translators: %s: comma-separated list of available tokens */
+								__( 'Available tokens: %s', 'wp-exam-success' ),
+								$item['tokens']
+							) ); ?></div>
+						</div>
+					<?php endforeach; ?>
+
+					<button type="submit" class="btn btn-primary" id="wpesMessageSettingsSaveBtn">
 						<?php esc_html_e( 'Save Settings', 'wp-exam-success' ); ?>
 					</button>
 				</form>

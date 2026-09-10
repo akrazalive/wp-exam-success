@@ -36,48 +36,33 @@ class WPES_Public {
 			return;
 		}
 
-		$token = sanitize_text_field( wp_unslash( $_GET['wpes_teacher_accept'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$token   = sanitize_text_field( wp_unslash( $_GET['wpes_teacher_accept'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$outcome = WPES_Teacher_Invites::handle_accept( $token );
 
-		switch ( $outcome['result'] ) {
-			case 'accepted':
-				$session = $outcome['session'];
-				$when    = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
-				wp_die(
-					sprintf(
-						/* translators: %s: session date and time */
-						esc_html__( "You're confirmed to teach this session on %s. A confirmation email is on its way.", 'wp-exam-success' ),
-						esc_html( $when )
-					),
-					esc_html__( 'Session Accepted', 'wp-exam-success' ),
-					array( 'response' => 200 )
-				);
-				break;
+		// Title/body for each outcome now come from Settings (Final
+		// Acceptance Testing item 4a/4b, 2026-09-10) instead of being
+		// hard-coded here, matching the rest of the plugin's user-facing
+		// content. {session_datetime} is the only placeholder any of
+		// these currently use.
+		$result_to_message_key = array(
+			'accepted'              => 'teacher_accepted',
+			'already_assigned'      => 'teacher_already_assigned',
+			'minimum_no_longer_met' => 'teacher_minimum_no_longer_met',
+		);
+		$message_key = $result_to_message_key[ $outcome['result'] ] ?? 'teacher_link_invalid';
+		$messages    = class_exists( 'WPES_Admin' ) ? WPES_Admin::get_status_messages() : array();
+		$message     = $messages[ $message_key ] ?? array( 'title' => '', 'body' => '' );
 
-			case 'already_assigned':
-				wp_die(
-					esc_html__( 'This session has already been assigned to another teacher. Thank you for responding.', 'wp-exam-success' ),
-					esc_html__( 'Already Assigned', 'wp-exam-success' ),
-					array( 'response' => 200 )
-				);
-				break;
-
-			case 'minimum_no_longer_met':
-				wp_die(
-					esc_html__( 'Thank you for responding — since this invitation was sent, enough participants have cancelled that this session no longer meets the minimum required to proceed. No assignment is needed at this time.', 'wp-exam-success' ),
-					esc_html__( 'No Longer Needed', 'wp-exam-success' ),
-					array( 'response' => 200 )
-				);
-				break;
-
-			default:
-				wp_die(
-					esc_html__( 'This invitation link is invalid or has expired.', 'wp-exam-success' ),
-					esc_html__( 'Link Expired', 'wp-exam-success' ),
-					array( 'response' => 200 )
-				);
-				break;
+		$when = '';
+		if ( ! empty( $outcome['session'] ) ) {
+			$when = get_date_from_gmt( $outcome['session']->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . ' (' . wp_timezone_string() . ')';
 		}
+
+		wp_die(
+			wp_kses_post( strtr( $message['body'], array( '{session_datetime}' => esc_html( $when ) ) ) ),
+			esc_html( $message['title'] ),
+			array( 'response' => 200 )
+		);
 	}
 
 	public static function body_class( $classes ) {

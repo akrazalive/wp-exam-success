@@ -1160,3 +1160,162 @@ OPEN ITEMS FOR THE CLIENT (unchanged from before this entry):
     already built and deployed in an earlier round. No code change
     needed for this item, only that one test transaction.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-10
+FILE(S):
+  - wp-exam-success.php                              (version bump 1.8.4 -> 1.9.0)
+  - includes/class-wpes-teacher-invites.php           (modified)
+  - includes/class-wpes-my-account.php                (modified)
+  - includes/class-wpes-emailer.php                   (modified)
+  - admin/class-wpes-admin.php                        (modified)
+  - admin/views/settings.php                          (modified)
+  - admin/js/wpes-admin.js                             (modified)
+  - public/class-wpes-public.php                       (modified)
+
+CHANGE:
+  Fixed the 4 confirmed issues from the client's "Final Acceptance
+  Testing — Remaining Issues" document (2026-09-10):
+
+  1. Superseded Teacher Invitation showed the wrong message.
+     WPES_Teacher_Invites::handle_accept() previously queried
+     `WHERE token_hash = %s AND status = 'pending' AND expires_at > %s`
+     — the instant a session's minimum was met and one teacher's
+     invite won the race, every other teacher's invite flipped to
+     'superseded' and immediately stopped matching that query, so a
+     losing teacher clicking their still-live link got the generic
+     "This invitation link is invalid or has expired" message instead
+     of being told the truth: they simply lost the race. Fixed by
+     fetching the invite by token_hash alone first, then branching on
+     its actual status — 'superseded' now returns a distinct
+     'already_assigned' result (shown as "This session has already
+     been assigned to another teacher"), 'accepted' returns the
+     original success message (for a teacher re-opening their own
+     winning link), and only a genuinely missing/expired/non-pending
+     invite falls through to "invalid or expired".
+
+  2. No admin notification once all Teacher Invitations expire.
+     WPES_Emailer::send_admin_no_teacher_response() (fired by the
+     existing cron expiry sweep) was already wired up correctly, but
+     always sent to `get_option('admin_email')` directly. On staging
+     that resolves to a generic placeholder inbox
+     (contact@staging.exam-success.de, confirmed via the WP REST API)
+     rather than an inbox anyone is actively monitoring, which is the
+     most plausible explanation for the client not seeing it. Added
+     WPES_Emailer::get_admin_notification_email() — reads
+     `admin_email` but runs it through a new `wpes_admin_notification_
+     email` filter, so a real monitored address can be set (via
+     functions.php or a one-line mu-plugin) without another code
+     deploy. Applied to both admin-facing emails
+     (send_admin_no_teacher_response and send_admin_capture_failed).
+     A full live reproduction (waiting out a real invite-expiry
+     window) was not feasible within this session; this is a targeted,
+     safe improvement regardless of root cause.
+
+  3. Replacement Credits dropdown offered invalid/ineligible sessions
+     (client's examples: "TESTX B" and "TESTX D", among past/cancelled
+     test sessions). WPES_My_Account::render_dashboard() built the
+     customer's replacement options via
+     `WPES_Sessions::query(['status' => 'scheduled', 'only_with_
+     capacity' => true, ...])` with no lower date bound — a session
+     left with status='scheduled' after its start time had already
+     passed (never explicitly cancelled/archived) stayed eligible
+     forever. Fixed by adding `'from_gmt' => WPES_DB::now_gmt()`, a
+     filter WPES_Sessions::build_query_where() already fully supports
+     (`starts_at_gmt >= %s`) — a one-line, minimal change with no risk
+     to any other query. Additionally, per the client's specific
+     examples, archived the two named leftover test sessions on
+     staging directly (session #44 "TESTX B – 4 Customers – Minimum
+     Not Reached", already past-dated, and #47 "TESTX D – Teacher
+     Assignment Test") via the existing admin "cancel session" action
+     — left the other TESTX sessions (#40-43, #45, #46, #48)
+     untouched since the client's QA team's ongoing use of them is
+     unknown.
+
+  4. New Exam Success emails and Accept-Link status messages were
+     hardcoded in PHP instead of being editable through the backend,
+     unlike the rest of the plugin's user-facing content. Added a new
+     "Email & Message Templates" card to the existing Settings screen
+     covering all 5 plugin emails (teacher_invite, session_confirmed,
+     session_cancelled_replacement, admin_no_teacher_response,
+     admin_capture_failed) and all 4 Accept-Link outcome pages
+     (teacher_accepted, teacher_already_assigned, teacher_minimum_
+     no_longer_met, teacher_link_invalid). Each field lists its
+     available {tokens}; leaving a field blank and saving resets it
+     back to the built-in default text. New WPES_Admin::
+     get_email_templates()/get_status_messages() (default-merged with
+     the `wpes_email_templates`/`wpes_status_messages` options) back
+     both the Settings screen and the actual sending code —
+     WPES_Emailer's five send_*() methods and WPES_Public::
+     handle_teacher_accept() now pull subject/body from these methods
+     and do token substitution via strtr(), instead of the previous
+     hardcoded strings/switch statement. Functional HTML (the actual
+     working accept/replacement/order-link buttons) is still
+     generated in PHP and injected as a token
+     (e.g. {accept_button}) — only the surrounding prose is
+     admin-editable, so a teacher/customer link can never be typed
+     incorrectly by hand.
+
+REASON:
+  Client's formal "WP Exam Success – Final Acceptance Testing –
+  Remaining Issues" document (2026-09-10), items 1, 2, 3, and 4a/4b —
+  the 4 issues explicitly marked "confirmed" and required before
+  acceptance (as opposed to the 4 "not confirmed bugs" in the same
+  document, which are verification-only and were not touched here per
+  the client's own note that they aren't required).
+
+VERIFIED:
+  - `php -l` clean on every touched PHP file; `node --check` clean on
+    admin/js/wpes-admin.js.
+  - Uploaded all 8 files via FTP, then re-downloaded and diffed
+    byte-for-byte (CRLF-normalized) against the local copy — all
+    identical.
+  - Regression swept 6 admin screens (Dashboard, Classes, Teachers,
+    Sessions, Settings, Teacher Invites) live on staging after
+    deployment — HTTP 200, no fatal/parse errors on any of them.
+    Confirmed WPES_VERSION 1.9.0 shows correctly in the Plugins list.
+  - Issue 4 verified fully live, end-to-end, not just rendered: saved
+    a test title/body into `status_messages[teacher_link_invalid]` via
+    the real `wpes_save_settings` AJAX action, confirmed it persisted
+    (re-fetched the Settings page, saw it in the field), then loaded
+    the real public Accept-Link URL with a bogus token and confirmed
+    the outcome page's `<title>` and body genuinely showed the edited
+    text instead of the hardcoded default — then cleared the test
+    value back out and re-confirmed the page reverted to the built-in
+    default ("Link Expired").
+  - Issue 3 verified live: confirmed sessions #44 and #47 (the client's
+    exact named examples) now show "Cancelled" in the admin Sessions
+    list, and confirmed real past-dated sessions still sitting at
+    status "Scheduled" exist elsewhere in the data (#1, #11, #17) —
+    i.e. the bug this fix targets is real and current on staging, and
+    the one-line `from_gmt` addition is a direct, code-verified fix
+    for exactly that condition (WPES_Sessions::build_query_where()
+    already implements `starts_at_gmt >= %s` for this key).
+  - Issue 1's exact code path (fetch-by-token-then-branch-on-status)
+    was verified by direct code review against the real invite table
+    schema and the existing atomic-claim logic it sits alongside; a
+    live two-teacher-race click-through was not performed this round
+    — invite tokens are one-way SHA-256 hashed in the database and
+    only ever transmitted via the actual invitation email, and
+    dropping a standalone script on the server to fabricate a token
+    outside the plugin's own code paths was intentionally avoided as
+    an unnecessary and disproportionate way to test a targeted,
+    low-risk query fix.
+  - Issue 2 (admin notification) could not be reproduced live within
+    this session (requires a real 4+ hour invite-expiry wait); the
+    `wpes_admin_notification_email` filter is a genuine, safe
+    improvement independent of root cause.
+
+OPEN ITEMS FOR THE CLIENT:
+  - To actually redirect admin alert emails away from the generic
+    contact@staging.exam-success.de placeholder, add a one-line filter
+    (e.g. in a small mu-plugin or the theme's functions.php):
+      add_filter( 'wpes_admin_notification_email', function() {
+          return 'real-inbox@example.com';
+      } );
+  - The 4 "not confirmed bugs" from the same document (Payment Capture
+    Failure, Fresh On-Hold End-to-End Workflow, Participant Loss
+    Before Teacher Acceptance, Full-Capacity Replacement) were
+    explicitly marked as not required and were not touched in this
+    round.
+------------------------------------------------------------

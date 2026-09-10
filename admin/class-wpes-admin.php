@@ -189,8 +189,10 @@ class WPES_Admin {
 		if ( ! current_user_can( self::CAP ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'wp-exam-success' ) );
 		}
-		$filters = self::get_frontend_filters();
-		$booking = self::get_booking_settings();
+		$filters         = self::get_frontend_filters();
+		$booking         = self::get_booking_settings();
+		$email_templates = self::get_email_templates();
+		$status_messages = self::get_status_messages();
 		include WPES_PLUGIN_DIR . 'admin/views/settings.php';
 	}
 
@@ -244,6 +246,45 @@ class WPES_Admin {
 			update_option( 'wpes_booking_settings', $booking, false );
 		}
 
+		// Final Acceptance Testing item 4a/4b (2026-09-10): the email
+		// texts and status messages this project introduced were
+		// hard-coded in PHP, unlike the rest of the plugin's user-facing
+		// content. Stored the same way as 'booking' above — merged over
+		// defaults, only the keys actually submitted are touched, empty
+		// values fall back to nothing here (WPES_Admin::get_email_
+		// templates()/get_status_messages() re-apply the built-in default
+		// text if a saved value is blank, so clearing a field resets it
+		// rather than sending an empty email).
+		if ( isset( $_POST['email_templates'] ) && is_array( $_POST['email_templates'] ) ) {
+			$existing = get_option( 'wpes_email_templates', array() );
+			if ( ! is_array( $existing ) ) {
+				$existing = array();
+			}
+			foreach ( (array) $_POST['email_templates'] as $key => $fields ) {
+				$key              = sanitize_key( $key );
+				$existing[ $key ] = array(
+					'subject' => isset( $fields['subject'] ) ? sanitize_text_field( wp_unslash( $fields['subject'] ) ) : '',
+					'body'    => isset( $fields['body'] ) ? wp_kses_post( wp_unslash( $fields['body'] ) ) : '',
+				);
+			}
+			update_option( 'wpes_email_templates', $existing, false );
+		}
+
+		if ( isset( $_POST['status_messages'] ) && is_array( $_POST['status_messages'] ) ) {
+			$existing = get_option( 'wpes_status_messages', array() );
+			if ( ! is_array( $existing ) ) {
+				$existing = array();
+			}
+			foreach ( (array) $_POST['status_messages'] as $key => $fields ) {
+				$key              = sanitize_key( $key );
+				$existing[ $key ] = array(
+					'title' => isset( $fields['title'] ) ? sanitize_text_field( wp_unslash( $fields['title'] ) ) : '',
+					'body'  => isset( $fields['body'] ) ? wp_kses_post( wp_unslash( $fields['body'] ) ) : '',
+				);
+			}
+			update_option( 'wpes_status_messages', $existing, false );
+		}
+
 		wp_send_json_success();
 	}
 
@@ -272,6 +313,112 @@ class WPES_Admin {
 		$out['auto_teacher_assignment']  = (bool) $out['auto_teacher_assignment'];
 		$out['teacher_invite_hours']     = max( 1, (int) $out['teacher_invite_hours'] );
 		$out['final_check_hours_before'] = max( 1, (int) $out['final_check_hours_before'] );
+		return $out;
+	}
+
+	/**
+	 * Backend-editable subject/body for every email WP Exam Success sends
+	 * on top of the existing WPES_Emailer methods (teacher invite, session
+	 * confirmed, replacement/cancellation, and the two admin alerts).
+	 * Added for Final Acceptance Testing item 4a/4b (2026-09-10): these
+	 * were previously hard-coded in PHP, unlike the rest of the system's
+	 * user-facing content. A saved value that's blank (or was never set)
+	 * falls back to the built-in default text below, so an empty save
+	 * never results in a blank email going out.
+	 *
+	 * Bodies support simple {token} placeholders — substituted by
+	 * WPES_Emailer at send time — documented per-field in
+	 * admin/views/settings.php. Tokens ending in _button/_link/_email
+	 * insert plugin-generated HTML (the actual Accept-Link, order link,
+	 * etc.) and cannot usefully be typed by hand; everything else is
+	 * plain text/values.
+	 *
+	 * @return array<string,array{subject:string,body:string}>
+	 */
+	public static function get_email_templates() {
+		$defaults = array(
+			'teacher_invite'                => array(
+				'subject' => __( 'Session invitation — {session_title}', 'wp-exam-success' ),
+				'body'    => __( '<p>Hi {teacher_name},</p><p>A session for {session_title} has reached its minimum number of participants and needs a teacher: {session_datetime}.</p>{accept_button}<p style="font-size:13px;color:#666;">This invitation was also sent to other suitable teachers — whoever accepts first is assigned. It expires in {invite_hours} hours.</p>', 'wp-exam-success' ),
+			),
+			'session_confirmed'             => array(
+				'subject' => __( 'Your session is confirmed — {session_title}', 'wp-exam-success' ),
+				'body'    => __( '<p>Hi {customer_name},</p><p>Good news — your session for {session_title} on {session_datetime} is confirmed, with {teacher_name} as your teacher.</p><p style="margin-top:24px;">{account_link}</p>', 'wp-exam-success' ),
+			),
+			'session_cancelled_replacement' => array(
+				'subject' => __( 'Session cancelled — replacement available for {session_title}', 'wp-exam-success' ),
+				'body'    => __( '<p>Hi {customer_name},</p><p>Unfortunately your session for {session_title} on {session_datetime} did not reach the minimum number of participants and will not take place.</p><p>No further action is needed on your part regarding payment — this session is covered by the package you already purchased, and you have not been charged separately for it.</p><p><strong>You have 1 replacement credit available.</strong> Use it to pick a different session at no additional cost.</p>{replacement_button}', 'wp-exam-success' ),
+			),
+			'admin_no_teacher_response'     => array(
+				'subject' => __( 'Action required: no teacher assigned — {session_title}', 'wp-exam-success' ),
+				'body'    => __( '<p>No teacher accepted the invitation for {session_title} on {session_datetime} within the configured time window.</p><p>This session still has no assigned teacher and needs a manual decision.</p>{assign_link}', 'wp-exam-success' ),
+			),
+			'admin_capture_failed'          => array(
+				'subject' => __( 'Action required: payment capture failed — order #{order_id}', 'wp-exam-success' ),
+				/* translators: do not translate the {tokens} */
+				'body'    => __( '<p>WP Exam Success attempted to capture the pre-authorized package payment for order #{order_id} after session #{session_id} confirmed, but the capture did not complete.</p><p>The order\'s status after the attempt was "{order_status}" instead of completed/processing.</p><p>No charge has been recorded internally, and the plugin will automatically retry the next time another session on this order is confirmed. If this keeps failing, please check the payment gateway directly (e.g. an expired authorization window).</p>{order_link}', 'wp-exam-success' ),
+			),
+		);
+
+		$saved = get_option( 'wpes_email_templates', array() );
+		if ( ! is_array( $saved ) ) {
+			$saved = array();
+		}
+
+		$out = array();
+		foreach ( $defaults as $key => $default ) {
+			$saved_subject  = isset( $saved[ $key ]['subject'] ) ? (string) $saved[ $key ]['subject'] : '';
+			$saved_body     = isset( $saved[ $key ]['body'] ) ? (string) $saved[ $key ]['body'] : '';
+			$out[ $key ]    = array(
+				'subject' => '' !== trim( $saved_subject ) ? $saved_subject : $default['subject'],
+				'body'    => '' !== trim( wp_strip_all_tags( $saved_body ) ) ? $saved_body : $default['body'],
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Backend-editable title/body for the four outcome pages a teacher
+	 * sees after clicking an Accept-Link (public/class-wpes-public.php).
+	 * Same rationale and fallback-to-default behaviour as
+	 * get_email_templates() above.
+	 *
+	 * @return array<string,array{title:string,body:string}>
+	 */
+	public static function get_status_messages() {
+		$defaults = array(
+			'teacher_accepted'              => array(
+				'title' => __( 'Session Accepted', 'wp-exam-success' ),
+				'body'  => __( "You're confirmed to teach this session on {session_datetime}. A confirmation email is on its way.", 'wp-exam-success' ),
+			),
+			'teacher_already_assigned'      => array(
+				'title' => __( 'Already Assigned', 'wp-exam-success' ),
+				'body'  => __( 'This session has already been assigned to another teacher. Thank you for responding.', 'wp-exam-success' ),
+			),
+			'teacher_minimum_no_longer_met' => array(
+				'title' => __( 'No Longer Needed', 'wp-exam-success' ),
+				'body'  => __( 'Thank you for responding — since this invitation was sent, enough participants have cancelled that this session no longer meets the minimum required to proceed. No assignment is needed at this time.', 'wp-exam-success' ),
+			),
+			'teacher_link_invalid'          => array(
+				'title' => __( 'Link Expired', 'wp-exam-success' ),
+				'body'  => __( 'This invitation link is invalid or has expired.', 'wp-exam-success' ),
+			),
+		);
+
+		$saved = get_option( 'wpes_status_messages', array() );
+		if ( ! is_array( $saved ) ) {
+			$saved = array();
+		}
+
+		$out = array();
+		foreach ( $defaults as $key => $default ) {
+			$saved_title = isset( $saved[ $key ]['title'] ) ? (string) $saved[ $key ]['title'] : '';
+			$saved_body  = isset( $saved[ $key ]['body'] ) ? (string) $saved[ $key ]['body'] : '';
+			$out[ $key ] = array(
+				'title' => '' !== trim( $saved_title ) ? $saved_title : $default['title'],
+				'body'  => '' !== trim( wp_strip_all_tags( $saved_body ) ) ? $saved_body : $default['body'],
+			);
+		}
 		return $out;
 	}
 

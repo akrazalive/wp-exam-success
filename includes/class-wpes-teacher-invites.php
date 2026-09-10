@@ -197,15 +197,42 @@ class WPES_Teacher_Invites {
 		$token_hash = hash( 'sha256', sanitize_text_field( $token ) );
 		$table      = WPES_DB::teacher_invites_table();
 
+		// Fetched by token alone, regardless of current status/expiry —
+		// the ONLY way to tell an accurate message apart is to see what
+		// actually happened to this specific invite (Final Acceptance
+		// Testing item 1, 2026-09-10). The previous query only matched
+		// status = 'pending', so a superseded invite (this teacher lost
+		// the race to another) returned nothing at all and fell through
+		// to the generic "invalid or expired" message, even though the
+		// link itself was never invalid — it simply lost.
 		$invite = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT * FROM {$table} WHERE token_hash = %s AND status = 'pending' AND expires_at > %s",
-				$token_hash,
-				WPES_DB::now_gmt()
-			)
+			$wpdb->prepare( "SELECT * FROM {$table} WHERE token_hash = %s", $token_hash )
 		);
 
 		if ( ! $invite ) {
+			return array( 'result' => 'invalid_or_expired' );
+		}
+
+		if ( 'superseded' === $invite->status ) {
+			return array(
+				'result'  => 'already_assigned',
+				'session' => WPES_Sessions::get( $invite->session_id ),
+				'teacher' => WPES_Teachers::get( $invite->teacher_id ),
+			);
+		}
+
+		if ( 'accepted' === $invite->status ) {
+			// This exact invite already won — most likely the same
+			// teacher opening their own link again. Show the original
+			// success message rather than a generic one.
+			return array(
+				'result'  => 'accepted',
+				'session' => WPES_Sessions::get( $invite->session_id ),
+				'teacher' => WPES_Teachers::get( $invite->teacher_id ),
+			);
+		}
+
+		if ( 'pending' !== $invite->status || strtotime( $invite->expires_at ) <= time() ) {
 			return array( 'result' => 'invalid_or_expired' );
 		}
 

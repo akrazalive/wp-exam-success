@@ -77,8 +77,13 @@ class WPES_My_Account {
 		$base_url = wc_get_page_permalink( 'myaccount' );
 
 		$replacement_credits = WPES_Replacements::get_available_credits( $user->ID, $user->user_email );
+		// from_gmt excludes sessions whose start time has already passed —
+		// status alone ('scheduled') isn't enough, since a past session
+		// stays 'scheduled' unless someone explicitly cancels it, and was
+		// showing up as a selectable "replacement" here (Final Acceptance
+		// Testing item 3, 2026-09-10).
 		$available_sessions  = ! empty( $replacement_credits )
-			? WPES_Sessions::query( array( 'status' => 'scheduled', 'only_with_capacity' => true, 'per_page' => 200 ) )
+			? WPES_Sessions::query( array( 'status' => 'scheduled', 'from_gmt' => WPES_DB::now_gmt(), 'only_with_capacity' => true, 'per_page' => 200 ) )
 			: array();
 
 		include WPES_PLUGIN_DIR . 'public/partials/my-account-sessions.php';
