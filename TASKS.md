@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-10 (latest: Final Acceptance Testing — Remaining Issues, see below)
+**Last updated:** 2026-09-10 (latest: Final Acceptance Testing — Live Verification Round, see below)
 
 ## Legend
 
@@ -25,6 +25,23 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Final Acceptance Testing — Live Verification Round (2026-09-10)
+
+Client's follow-up email asked for 6 specific scenarios to be verified LIVE on staging (not code review), plus documentation of the admin-notification-email filter. No code changes this round — pure testing of what was already deployed. Full detail in `CHANGE_LOG.txt`'s 2026-09-10 16:43 UTC entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Teacher "Already Assigned" — two real teachers, real Accept-Links | ✅ **Done, verified live.** Real invite round, real tokens pulled from actual sent emails (WP Mail Logging), Teacher A accepted, Teacher B's link correctly showed "already assigned to another teacher." |
+| 2 | Admin notification after invite expiry, accelerated | 🟡 **In progress.** Real test invite created with a temporarily-shortened 1-hour expiry (client's own suggested approach); will sweep and report once it has genuinely expired. |
+| 3 | Payment Capture Failure — genuine test | ❌ **Cannot be completed by this session alone.** Needs manual capture back on (currently off) AND one real browser checkout with a capture-failure test card — this literally cannot be scripted, by WooPayments' own design (raw card data never leaves Stripe's client-side widget). |
+| 4 | Fresh On-Hold End-to-End Workflow | ❌ **Same blocker as #3** — needs one real browser checkout. |
+| 5 | Participant Loss Before Teacher Acceptance | ✅ **Done, verified live.** Simulated by temporarily raising the global minimum right after a real invite was sent (equivalent to losing a participant, from the guard's own logic) — Accept-Link correctly refused with "no longer meets the minimum," session stayed unassigned. Setting reverted immediately after. |
+| 6 | Full-Capacity Replacement | ✅ **Done, verified live.** Real 1-seat session filled, real credit earned via a real failed session, redemption attempted directly against the full session (bypassing the UI's own dropdown filtering) — correctly rejected, credit confirmed still available afterward, not lost. |
+
+**Documentation answer given**: the `wpes_admin_notification_email` filter (already live in the code, no further plugin change needed) — exact snippet and where to put it in `CHANGE_LOG.txt`'s Open Items.
 
 ---
 

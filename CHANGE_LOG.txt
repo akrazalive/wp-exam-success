@@ -1319,3 +1319,154 @@ OPEN ITEMS FOR THE CLIENT:
     explicitly marked as not required and were not touched in this
     round.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-10 16:43 UTC (item 2 continues past this timestamp — see below)
+FILE(S):
+  - None. This entry is live verification testing of already-deployed
+    code (the 2026-09-10 entry above), not a code change.
+
+CHANGE:
+  Client's follow-up email requested live verification (not just code
+  review) of 6 specific scenarios before final acceptance. Result per
+  item:
+
+  1. Teacher Invitation "Already Assigned" — DONE, verified live with
+     two real teachers, real Accept-Links, no shortcuts. Created a
+     real test session, enrolled 5 real test attendees to trigger a
+     genuine invite round to all 3 currently-active teachers for that
+     class. Retrieved the real Accept-Link tokens for "Test Teacher A"
+     and "Test Teacher B" directly from their actual sent emails (via
+     the WP Mail Logging plugin already installed on staging — no
+     database access, no fabricated tokens, no shortcuts around the
+     plugin's own code paths). Teacher A's link: hit first, returned
+     "Session Accepted" and the session correctly shows Teacher A
+     assigned. Teacher B's link (same invite round, now superseded):
+     hit second, returned "This session has already been assigned to
+     another teacher. Thank you for responding." — the exact wording
+     required. Test session archived afterward.
+
+  5. Participant Loss Before Teacher Acceptance — DONE, verified live.
+     Created a real test session, enrolled exactly 5 real test
+     attendees (the minimum), retrieved Teacher A's real Accept-Link
+     token the same way as item 1. Rather than removing an attendee
+     (no admin action exists to cancel a single confirmed booking —
+     a pre-existing gap, not introduced by this project), simulated
+     the equivalent condition the code actually checks: temporarily
+     raised the global Minimum Participants setting from 5 to 6
+     immediately after the invite was sent, so the session's real
+     confirmed count (5) now sits below the live minimum at the exact
+     moment of acceptance — functionally identical to losing a
+     participant, from the guard's own point of view (it compares live
+     COUNT(*) against the live setting, not against attendee identity).
+     Hit the real Accept-Link: correctly returned "Thank you for
+     responding — since this invitation was sent, enough participants
+     have cancelled that this session no longer meets the minimum
+     required to proceed. No assignment is needed at this time."
+     Confirmed the session stayed unassigned (no invalid confirmation
+     occurred). Reverted Minimum Participants back to 5 immediately
+     afterward and confirmed the revert. Test session archived.
+
+  6. Full-Capacity Replacement — DONE, verified live. Created a
+     1-seat session and filled its only seat with a real test booking.
+     Separately created a session that would fail its minimum (with my
+     own account as one of the attendees, specifically so the
+     resulting credit would be mine to test the redemption with),
+     forced it through the real final-check cron (via WP Crontrol,
+     same technique used in earlier rounds), confirmed it was
+     correctly cancelled and a real replacement credit appeared on my
+     own My Account page. Confirmed first that the full session
+     correctly does NOT appear in the replacement session picker's own
+     dropdown (client-side filtering already works) — then, for the
+     real test, bypassed that dropdown entirely and submitted the
+     redemption directly against the full session's ID via the same
+     admin-post.php endpoint a real submission would use. Result:
+     redirected with "redeem_failed", and the credit was confirmed
+     still present and marked available on a fresh My Account page
+     load afterward — never consumed. Confirmed in code exactly why:
+     WPES_Replacements::redeem_credit() claims the credit atomically
+     first (status -> 'used'), attempts the reservation, and on
+     failure explicitly restores the credit's status back to
+     'available' before returning the error — the precise mechanism
+     the client asked for. Both test sessions archived afterward.
+
+  2. Admin Notification after Invitation Expiry — IN PROGRESS, using
+     the client's own suggested approach ("the expiry condition should
+     be artificially or temporarily accelerated"). Temporarily set
+     Teacher Invitation Validity to 1 hour (the minimum the settings
+     screen allows), created a real test session, enrolled 5 real test
+     attendees to trigger a genuine invite round with a 1-hour expiry,
+     and immediately reverted the setting back to 4 hours afterward
+     (safe to do without affecting this specific invite — its expiry
+     time was already computed and stored at creation). No Accept-Link
+     for this round will be clicked, so the invite will genuinely
+     expire on its own. Will trigger the existing expiry-sweep cron
+     once the hour has passed and report the mail log result in a
+     follow-up entry. Note: proving an email was actually received
+     requires a real monitored inbox, which is not available in this
+     session — the mail log's own send-success/failure status is the
+     closest available proof of "was the notification actually
+     generated and dispatched," and will be reported as such, not
+     overstated as "received."
+
+  3. Payment Capture Failure — NOT DONE, and not something this
+     session can complete alone. Confirmed staging's WooPayments
+     "manual capture" setting is currently OFF (checked directly via
+     the WooCommerce REST API) — without it, orders never sit
+     'on-hold' awaiting a capture at all, so there is nothing to fail.
+     Even with it back on, actually completing a real checkout
+     requires entering real payment details through Stripe's own
+     client-side Elements widget in a real browser — by design,
+     WooPayments never lets raw card data reach anything but Stripe's
+     own iframe, so this cannot be scripted server-side without
+     defeating that protection. This needs a real person, in a real
+     browser, placing one real test-mode purchase with a card
+     specifically chosen to fail at the capture step (the same way the
+     client placed the two real test purchases for the earlier
+     positive/negative payment test). The safety net this test would
+     be checking was already built in an earlier round (capture is
+     only ever marked successful after re-confirming the order's real
+     post-transition status; a failed capture releases its claim for
+     automatic retry and emails the admin).
+
+  4. Fresh On-Hold End-to-End Workflow — NOT DONE, same root cause as
+     item 3: requires manual capture back on AND one real browser
+     checkout, neither of which this session can do alone.
+
+REASON:
+  Client's follow-up email (2026-09-10), 6 named items required for
+  final acceptance, explicitly requesting live/staging verification
+  rather than code review for each.
+
+VERIFIED:
+  See per-item detail above — items 1, 5, and 6 were each proven with
+  real staging data, real emails, real tokens retrieved from actual
+  sent mail (not fabricated), and real HTTP requests against the exact
+  endpoints a genuine user action would hit. No shortcuts, no
+  standalone scripts bypassing the plugin's own code paths.
+
+OPEN ITEMS FOR THE CLIENT:
+  - Items 3 and 4 both need one thing only you/the client can do: turn
+    WooPayments' manual-capture setting back on, then place one (item
+    4) or two (item 3 — one normal test purchase, one using a card
+    designed to fail at capture) real test-mode checkouts. Once done,
+    tell us and we'll verify the resulting Order/Booking/Session state
+    immediately, the same way the original positive/negative payment
+    test was verified.
+  - The exact filter to redirect admin alert emails off the generic
+    staging placeholder inbox (asked again in this email) — same
+    answer as the 2026-09-10 entry above, repeated here for
+    convenience:
+      add_filter( 'wpes_admin_notification_email', function() {
+          return 'real-inbox@example.com';
+      } );
+    Add this as a one-line snippet in a small mu-plugin (a single PHP
+    file dropped in wp-content/mu-plugins/, loads automatically, no
+    activation needed) or in the active theme's functions.php
+    (wp-examsuccess-theme/functions.php). Confirmed in the actual
+    plugin code (includes/class-wpes-emailer.php,
+    get_admin_notification_email()) that both admin-facing alerts
+    (no-teacher-response and capture-failed) already read this filter
+    — no plugin code change is needed to use it, only adding the
+    filter itself wherever you'd like it to live.
+------------------------------------------------------------
