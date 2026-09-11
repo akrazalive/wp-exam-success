@@ -1921,3 +1921,93 @@ OPEN ITEMS FOR THE CLIENT:
     document) were not included in the message text received — cannot
     be addressed until that content is provided.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-11 (items 7-10)
+FILE(S):
+  - admin/views/settings.php                          (modified)
+
+CHANGE:
+  Client provided items 7-10 (text, no separate document needed).
+  Confirmed all 4 are the SAME 4 points already fixed in this same
+  day's earlier entries (7=4, 8=5, 9=6, 10=3 from the "Outstanding
+  Points for Review" round) — not new bugs. Investigated why the
+  client still reported them as broken rather than assuming they were
+  simply wrong:
+
+  - Item 9 (teacher meeting-link email): checked the Teacher Invites
+    admin table for the most recent real "Accepted" response for Test
+    Teacher A — it was recorded at 2026-09-11 15:35 (site time),
+    BEFORE this session's fix was deployed (~22:2x site time / 14:2x
+    UTC). Confirms the client's item 9 report describes the same
+    pre-fix evidence as item 6 earlier today, not a fresh post-fix
+    test — the same pattern already found for Order #1190 (item 3).
+
+  - Item 7 (booking page selection): re-verified the exact deployed
+    public/js/wpes-public.js (byte-diffed clean against local) and ran
+    its actual toggleSession()/selectPackage() functions, copied
+    verbatim, in a real Node.js execution (not just re-reading the
+    code) reproducing the client's exact repro steps — click a session
+    before any package is chosen, then choose a 4-session package.
+    Result: the session is genuinely retained as the first selected
+    session. Passed.
+
+  - Item 8 (table sorting): re-ran live sort tests against every one
+    of the 7 admin tables this time (the original items-1-6 entry only
+    covered 5) — added Replacement Credits (sort by Customer) and
+    Teacher Invites (sort by Status) to the previously-tested Classes,
+    Teachers, Sessions, Waitlist, and Bookings. All 7 confirmed
+    genuinely reordering both ascending and descending.
+
+  - Item 9, re-confirmed with a brand-new fresh send: triggered the
+    admin "Resend" action against session #47 again, right now — a
+    new email (mail log ID 403, 2026-09-12 02:09 site time) confirmed
+    sent to the assigned teacher's real address. This is unambiguously
+    after every fix deployed today.
+
+  - Item 10 (admin notification email — client says they still need
+    clarification/documentation): rather than relying on this being
+    explained correctly secondhand, put the full answer directly in
+    the product itself — expanded the "Admin Notification Email"
+    field's own help text on the Settings screen to explicitly state:
+    this field is the address actually used, blank falls back to the
+    site admin email (that's the entire setup), and the
+    wpes_admin_notification_email PHP filter is an optional advanced
+    override that always wins if used but is not required. No more
+    external documentation needed to answer this — it's on the
+    settings page itself now.
+
+REASON:
+  Client re-sent items 7-10 as still-open after the earlier fixes in
+  this same day's rounds; investigated rather than assumed stale, and
+  confirmed via fresh live evidence rather than re-asserting the
+  earlier fix was already sufficient.
+
+VERIFIED:
+  - php -l clean; admin/views/settings.php uploaded via FTP and
+    byte-diffed (SHA-256) clean against local.
+  - No fatal errors: front page, booking page, and the Settings screen
+    itself all load clean (HTTP 200) after deploy; the new help text
+    was confirmed actually rendering on the live Settings page.
+  - Item 7: real Node.js execution of the exact deployed JS functions,
+    not just code review — see CHANGE above.
+  - Item 8: fresh live AJAX sort requests against all 7 admin tables,
+    each returning genuinely reordered results both directions.
+  - Item 9: a brand-new real email, sent and logged after every change
+    made today, addressed to the teacher.
+  - Item 10: confirmed live by re-loading the Settings screen and
+    reading the actual rendered help text.
+
+OPEN ITEMS FOR THE CLIENT:
+  - None of items 7-10 need further code changes. Recommend the
+    client's own re-test happens in a fresh/incognito browser tab
+    (rules out any local browser cache) and against a genuinely new
+    action (a session clicked fresh on the booking page; a real new
+    teacher acceptance rather than re-reading an earlier one) so the
+    timestamp is unambiguous — several of the "still broken" reports
+    turned out to be re-reads of evidence that predated the fix,
+    rather than fresh failures.
+  - Order #1190 (items 1/2/3) still needs the client's explicit
+    decision on whether to actually retry the payment capture — see
+    the previous entry and this session's chat response.
+------------------------------------------------------------

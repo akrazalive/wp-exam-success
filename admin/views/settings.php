@@ -127,7 +127,20 @@ $labels = array(
 					<div class="mb-3">
 						<label class="form-label" for="wpesAdminNotificationEmail"><?php esc_html_e( 'Admin Notification Email', 'wp-exam-success' ); ?></label>
 						<input type="email" class="form-control" style="max-width: 320px;" id="wpesAdminNotificationEmail" name="booking[admin_notification_email]" value="<?php echo esc_attr( $booking['admin_notification_email'] ); ?>" placeholder="e.g. bookings@yourcompany.com" />
-						<div class="form-text"><?php esc_html_e( 'Where "no teacher responded" and "payment capture failed" alerts are sent. Leave blank to use this site\'s normal WordPress admin email instead.', 'wp-exam-success' ); ?></div>
+						<div class="form-text">
+							<?php esc_html_e( 'This field is the address actually used for both admin alert emails: "no teacher responded" and "payment capture failed". Leave blank and this site\'s normal WordPress admin email is used instead — that\'s the entire setup, no other configuration is needed.', 'wp-exam-success' ); ?>
+							<br />
+							<?php
+							echo wp_kses(
+								sprintf(
+									/* translators: %s: the literal filter name, wrapped in a <code> tag */
+									__( 'Advanced/optional: a developer can still override this with the %s PHP filter, which always wins over the field above if used — this is not required for normal use.', 'wp-exam-success' ),
+									'<code>wpes_admin_notification_email</code>'
+								),
+								array( 'code' => array() )
+							);
+							?>
+						</div>
 					</div>
 
 					<button type="submit" class="btn btn-primary" id="wpesBookingSettingsSaveBtn">

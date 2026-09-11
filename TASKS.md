@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-11 (latest: Outstanding Points for Review — client re-check follow-up, see below)
+**Last updated:** 2026-09-11 (latest: Outstanding Points for Review — items 7-10, see below)
 
 ## Legend
 
@@ -25,6 +25,19 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Outstanding Points for Review — items 7-10 (2026-09-11)
+
+Client sent 4 more items (7-10). Turned out to be the same 4 points from items 3/4/5/6 above, restated — not new bugs. Investigated why the client still saw them as broken instead of assuming they were wrong: for items 9 and 3/1190, the client's evidence predated this session's fix deploy (confirmed via timestamps — the most recent real teacher acceptance and Order #1190's order notes both stop before the fix went live). Full detail in `CHANGE_LOG.txt`'s 2026-09-11 (items 7-10) entry.
+
+| # | Maps to | Item | Status |
+|---|---|---|---|
+| 7 | 4 | Booking page initial session selection | ✅ Re-verified with a real Node.js execution of the actual deployed function (not just code review) reproducing the client's exact steps — passed. |
+| 8 | 5 | Backend table sorting | ✅ Re-verified live against all 7 admin tables this time (previously only 5 were tested) — all genuinely reorder both directions. |
+| 9 | 6 | Teacher meeting-link email | ✅ Re-confirmed with a brand-new real email sent and logged (mail log ID 403) after every change made today — unambiguously fresh proof. |
+| 10 | 3 | Admin notification email documentation | ✅ Put the full answer directly into the product: expanded the Settings screen's own help text so the field, its fallback, and the optional filter are all explained right there — no external documentation needed. |
 
 ---
 
