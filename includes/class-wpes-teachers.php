@@ -270,7 +270,15 @@ class WPES_Teachers {
 		$offset   = ( $page - 1 ) * $per_page;
 		$table    = WPES_DB::teachers_table();
 
-		$sql      = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY name ASC LIMIT %d OFFSET %d";
+		// Backend table sorting (Final Acceptance review, 2026-09-11):
+		// whitelist of the only columns this admin table can genuinely sort
+		// by; anything else (or nothing passed, e.g. every other caller of
+		// this method) keeps the original default order.
+		$allowed   = array( 'name' => 'name', 'email' => 'email', 'status' => 'status' );
+		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 'name';
+		$order_dir = ( isset( $args['order_dir'] ) && 'desc' === strtolower( $args['order_dir'] ) ) ? 'DESC' : 'ASC';
+
+		$sql      = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY {$order_col} {$order_dir} LIMIT %d OFFSET %d";
 		$params[] = $per_page;
 		$params[] = $offset;
 

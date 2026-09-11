@@ -22,6 +22,13 @@
         filters: { class_id: '', level: '', day: '', time: '', availability: '' },
         package: null,
         selectedSessions: [],
+        // Final Acceptance review (2026-09-11): the session a visitor
+        // clicked to select BEFORE any package was chosen yet. toggleSession()
+        // records it here instead of just discarding it, so selectPackage()
+        // can carry it over as the first selected session once a package is
+        // actually picked — previously the click was silently lost and the
+        // visitor had to click the same session again after choosing a package.
+        pendingSessionId: null,
         sessionsData: [],
         isLoading: false,
         visitorIp: '',
@@ -589,7 +596,7 @@
     } );
 
     function toggleSession(sessionId) {
-        if (!state.package) { openPackageModal(); return; }
+        if (!state.package) { state.pendingSessionId = sessionId; openPackageModal(); return; }
         var idx = state.selectedSessions.findIndex(function (s) { return s.id === sessionId; });
         if (idx >= 0) {
             state.selectedSessions.splice(idx, 1);
@@ -655,6 +662,11 @@
     function closePackageModal() {
         $packageModal.prop('hidden', true);
         $('body').removeClass('wpes-modal-open');
+        // Dismissed without choosing a package (X / backdrop) — don't let a
+        // stale pending click surface later against an unrelated package.
+        // selectPackage() already consumes and clears this before calling
+        // closePackageModal() on the success path, so this is a no-op there.
+        state.pendingSessionId = null;
     }
 
     function loadPackages() {
@@ -690,6 +702,22 @@
     function selectPackage(pkg) {
         state.package = pkg;
         state.selectedSessions = [];
+
+        // Carry over the session the visitor clicked before this package
+        // modal was opened (see state.pendingSessionId above), so it doesn't
+        // have to be re-clicked. Still respects this package's own session
+        // count/type rules exactly like a normal toggleSession() click would.
+        if (state.pendingSessionId) {
+            var pending = findSessionById(state.pendingSessionId);
+            if (pending) {
+                state.selectedSessions.push({
+                    id: pending.id, title: pending.title, class_name: pending.class_name,
+                    level: pending.level, starts_at_gmt: pending.starts_at_gmt, ends_at_gmt: pending.ends_at_gmt
+                });
+            }
+        }
+        state.pendingSessionId = null;
+
         saveState();
         closePackageModal();
         updateStickyBar();

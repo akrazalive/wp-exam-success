@@ -67,6 +67,10 @@
 				order: [],
 				dom: 'Bfrtip',
 				buttons: dtButtons(),
+				// Final Acceptance review (2026-09-11): Actions has no
+				// single sortable value (it's a row of buttons) — matches
+				// the same exclusion already used on every other table here.
+				columnDefs: [ { orderable: false, targets: -1 } ],
 				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
 			} );
 
@@ -93,7 +97,9 @@
 				order: [],
 				dom: 'Bfrtip',
 				buttons: dtButtons(),
-				columnDefs: [ { orderable: false, targets: -1 } ],
+				// Column 2 (Classes) is a computed comma-joined list, not a
+				// single DB value — left unsortable rather than faked.
+				columnDefs: [ { orderable: false, targets: [ 2, -1 ] } ],
 				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
 			} );
 
@@ -121,7 +127,10 @@
 				order: [],
 				dom: 'Bfrtip',
 				buttons: dtButtons(),
-				columnDefs: [ { orderable: false, targets: -1 } ],
+				// Capacity (3, "booked / max") and Meeting Link (4, set/not
+				// set) are computed/boolean display cells, not single
+				// sortable DB values — left unsortable rather than faked.
+				columnDefs: [ { orderable: false, targets: [ 3, 4, -1 ] } ],
 				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
 			} );
 
@@ -182,6 +191,10 @@
 				order: [],
 				dom: 'Bfrtip',
 				buttons: dtButtons(),
+				// Session (0) concatenates class name + session title + a
+				// date sub-line into one cell — not a single sortable DB
+				// value — left unsortable rather than faked.
+				columnDefs: [ { orderable: false, targets: [ 0 ] } ],
 				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
 			} );
 
@@ -208,6 +221,11 @@
 				order: [],
 				dom: 'Bfrtip',
 				buttons: dtButtons(),
+				// Source Session (1) and Redeemed For (4) each concatenate
+				// a class/session/date (or a "not yet redeemed" fallback)
+				// into one cell — not a single sortable DB value — left
+				// unsortable rather than faked.
+				columnDefs: [ { orderable: false, targets: [ 1, 4 ] } ],
 				language: { search: '', processing: '<div class="spinner-border spinner-border-sm"></div> Loading…' }
 			} );
 

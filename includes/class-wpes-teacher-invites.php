@@ -524,6 +524,18 @@ class WPES_Teacher_Invites {
 		$sessions_table = WPES_DB::sessions_table();
 		$classes_table  = WPES_DB::classes_table();
 
+		// Backend table sorting (Final Acceptance review, 2026-09-11).
+		$allowed = array(
+			'teacher_name'          => 't.name',
+			'status'                => 'i.status',
+			'created_at'            => 'i.created_at',
+			'expires_at'            => 'i.expires_at',
+			'responded_at'          => 'i.responded_at',
+			'session_starts_at_gmt' => 's.starts_at_gmt',
+		);
+		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 'i.created_at';
+		$order_dir = ( isset( $args['order_dir'] ) && 'asc' === strtolower( $args['order_dir'] ) ) ? 'ASC' : 'DESC';
+
 		$sql = "SELECT i.*, t.name AS teacher_name, t.email AS teacher_email,
 				s.title AS session_title, s.starts_at_gmt AS session_starts_at_gmt,
 				c.name AS class_name
@@ -532,7 +544,7 @@ class WPES_Teacher_Invites {
 			INNER JOIN {$sessions_table} s ON s.id = i.session_id
 			LEFT JOIN {$classes_table} c ON c.id = s.class_id
 			WHERE {$where_sql}
-			ORDER BY i.created_at DESC
+			ORDER BY {$order_col} {$order_dir}
 			LIMIT %d OFFSET %d";
 
 		$params[] = $per_page;

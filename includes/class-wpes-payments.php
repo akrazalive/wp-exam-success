@@ -70,6 +70,29 @@ class WPES_Payments {
 	const CAPTURED_BY_SESSION_META = '_wpes_captured_by_session';
 
 	/**
+	 * WooPayments' own order meta key holding the real Stripe Payment
+	 * Intent status (values from WCPay\Constants\Intent_Status — e.g.
+	 * 'requires_capture', 'succeeded'). Confirmed by reading WooPayments'
+	 * own source (class-wc-payments-order-service.php) on staging: when
+	 * its capture_authorization_on_order_status_change() genuinely fails
+	 * to capture, it ONLY adds an order note ("Capture authorization
+	 * failed to complete") — it does NOT touch the WooCommerce order
+	 * status at all, and does not update this meta key either (both are
+	 * only set on the success path). This is the confirmed root cause of
+	 * a real bug found in client testing (Order #1190, 2026-09-11): this
+	 * class's own update_status('completed') call had already set the
+	 * WC order status before WooPayments' capture attempt even ran, so
+	 * re-checking $order->get_status() afterward saw 'completed'
+	 * regardless of whether the actual charge succeeded — a false
+	 * positive that both left the order sitting at a status implying
+	 * successful payment, AND skipped the failure-handling branch
+	 * entirely (so no admin email either — both client-reported bugs
+	 * traced back to this one root cause).
+	 */
+	const GATEWAY_INTENT_STATUS_META = '_intention_status';
+	const GATEWAY_INTENT_SUCCESS_VALUE = 'succeeded';
+
+	/**
 	 * Capture this order's pre-authorized package payment, if it's
 	 * actually awaiting one — called once a session on this order
 	 * reaches its minimum participants and gets a teacher assigned.
@@ -163,7 +186,22 @@ class WPES_Payments {
 		$fresh_order  = wc_get_order( $order_id );
 		$final_status = $fresh_order ? $fresh_order->get_status() : 'unknown';
 
-		if ( $fresh_order && in_array( $final_status, array( 'completed', 'processing' ), true ) ) {
+		// The order-status check above is NOT sufficient on its own —
+		// confirmed by a real capture failure in client testing (see the
+		// class docblock and GATEWAY_INTENT_STATUS_META above): this
+		// class already set the status to 'completed' before the gateway
+		// even attempted the capture, and WooPayments does not revert it
+		// on failure. Cross-check the gateway's own intent-status meta as
+		// a second, more precise signal when it's present (i.e. when
+		// WooPayments or a compatible Stripe-based gateway is active); if
+		// it isn't present at all (a different gateway that doesn't use
+		// this convention), fall back to the order-status check alone so
+		// this stays working, just less precisely, with any gateway.
+		$intention_status     = $fresh_order ? $fresh_order->get_meta( self::GATEWAY_INTENT_STATUS_META ) : '';
+		$gateway_meta_present = '' !== $intention_status;
+		$gateway_confirms_ok  = ! $gateway_meta_present || ( self::GATEWAY_INTENT_SUCCESS_VALUE === $intention_status );
+
+		if ( $fresh_order && in_array( $final_status, array( 'completed', 'processing' ), true ) && $gateway_confirms_ok ) {
 			$fresh_order->update_meta_data( self::CAPTURED_META, 'yes' );
 			$fresh_order->update_meta_data( self::CAPTURED_BY_SESSION_META, (int) $session_id );
 			$fresh_order->save();
@@ -179,13 +217,27 @@ class WPES_Payments {
 		// automatic retries keep failing.
 		$wpdb->delete( WPES_DB::payment_captures_table(), array( 'order_id' => $order_id ), array( '%d' ) );
 
+		// Undo this class's own premature status change — an order must
+		// never be left sitting at 'completed'/'processing' (a status
+		// that implies successful payment) when the capture behind it did
+		// not actually go through. Only touch it if it's still sitting at
+		// the status this method itself set; if something else already
+		// moved it on (e.g. a refund, an admin action), leave that alone.
+		if ( $fresh_order && in_array( $final_status, array( 'completed', 'processing' ), true ) ) {
+			$fresh_order->update_status(
+				'on-hold',
+				__( 'WP Exam Success: reverting to On hold — the payment capture attempted above did not actually succeed at the gateway (see the note below/above from the gateway itself).', 'wp-exam-success' )
+			);
+		}
+
 		if ( $fresh_order ) {
 			$fresh_order->add_order_note(
 				sprintf(
-					/* translators: 1: session ID, 2: resulting order status */
-					__( 'WP Exam Success: payment capture for session #%1$d did not complete — order status is "%2$s" instead of completed/processing. Will retry automatically the next time a session on this order confirms; admin has been notified.', 'wp-exam-success' ),
+					/* translators: 1: session ID, 2: resulting order status, 3: gateway intent status or "n/a" */
+					__( 'WP Exam Success: payment capture for session #%1$d did not complete — order status was "%2$s" and the gateway intent status is "%3$s" (expected "succeeded"). Reverted to On hold and will retry automatically the next time a session on this order confirms; admin has been notified.', 'wp-exam-success' ),
 					(int) $session_id,
-					$final_status
+					$final_status,
+					$gateway_meta_present ? $intention_status : 'n/a'
 				)
 			);
 		}

@@ -288,6 +288,20 @@ class WPES_Sessions {
 		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
 		$offset   = ( $page - 1 ) * $per_page;
 
+		// Backend table sorting (Final Acceptance review, 2026-09-11): only
+		// honored when explicitly requested (the admin Sessions table) —
+		// every other caller (frontend session picker, etc.) passes no
+		// order_by and keeps the original starts_at_gmt ASC default.
+		$allowed   = array(
+			'class_name'    => 'c.name',
+			'title'         => 's.title',
+			'starts_at_gmt' => 's.starts_at_gmt',
+			'teacher_name'  => 't.name',
+			'status'        => 's.status',
+		);
+		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 's.starts_at_gmt';
+		$order_dir = ( isset( $args['order_dir'] ) && 'desc' === strtolower( $args['order_dir'] ) ) ? 'DESC' : 'ASC';
+
 		$sql = "
 			SELECT s.*, c.name AS class_name, t.name AS teacher_name,
 				COALESCE(b.booked, 0) AS booked,
@@ -303,7 +317,7 @@ class WPES_Sessions {
 			) b ON b.session_id = s.id
 			WHERE {$where_sql}
 			{$having_sql}
-			ORDER BY s.starts_at_gmt ASC
+			ORDER BY {$order_col} {$order_dir}
 			LIMIT %d OFFSET %d
 		";
 

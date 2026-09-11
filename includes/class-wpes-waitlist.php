@@ -181,7 +181,12 @@ class WPES_Waitlist {
 		$offset   = ( $page - 1 ) * $per_page;
 		$table    = WPES_DB::waitlist_table();
 
-		$sql = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY created_at DESC LIMIT %d OFFSET %d";
+		// Backend table sorting (Final Acceptance review, 2026-09-11).
+		$allowed   = array( 'name' => 'name', 'email' => 'email', 'form_name' => 'form_name', 'created_at' => 'created_at' );
+		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 'created_at';
+		$order_dir = ( isset( $args['order_dir'] ) && 'asc' === strtolower( $args['order_dir'] ) ) ? 'ASC' : 'DESC';
+
+		$sql = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY {$order_col} {$order_dir} LIMIT %d OFFSET %d";
 		$params[] = $per_page;
 		$params[] = $offset;
 

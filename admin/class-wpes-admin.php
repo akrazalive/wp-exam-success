@@ -438,6 +438,44 @@ class WPES_Admin {
 		check_ajax_referer( 'wpes_admin_nonce', 'nonce' );
 	}
 
+	/**
+	 * Final Acceptance review (2026-09-11): "Backend – Table Sorting" bug.
+	 * Every ajax_datatable_*() handler below builds its own $args and hands
+	 * them to a model's query()/query_report() method, but none of them
+	 * ever read DataTables' own `order` request parameter — so clicking a
+	 * sortable column heading changed nothing (most tables), or silently
+	 * did nothing regardless of which column was clicked. Confirmed by
+	 * reading every handler: none referenced $_POST['order'] at all.
+	 *
+	 * This is the one place that reads it. $columns maps each DataTable
+	 * column INDEX (left to right, matching the <thead> in the matching
+	 * admin/views/*.php) to the DB sort key a handler's model class
+	 * actually understands — or `null` for a column that has no single
+	 * underlying DB value to sort by (computed/concatenated HTML cells
+	 * like "Actions" or a joined multi-field preview), which this
+	 * intentionally refuses to fake-sort by. Those columns are also marked
+	 * `orderable: false` in admin/js/wpes-admin.js so clicking their
+	 * heading doesn't even show a sort arrow.
+	 *
+	 * @param array  $columns    Column index (int) => sort key (string) or null.
+	 * @param string $default_key Sort key to use if the request has no
+	 *                             usable order (first load, or a bogus index).
+	 * @param string $default_dir 'asc' or 'desc'.
+	 * @return array{0:string,1:string} [ order_by key, 'asc'|'desc' ]
+	 */
+	private static function get_datatable_order( array $columns, $default_key, $default_dir = 'asc' ) {
+		$requested = isset( $_POST['order'] ) ? (array) $_POST['order'] : array();
+		$first     = isset( $requested[0] ) ? (array) $requested[0] : array();
+		$col_index = isset( $first['column'] ) ? (int) $first['column'] : -1;
+		$dir       = isset( $first['dir'] ) && 'desc' === strtolower( sanitize_key( $first['dir'] ) ) ? 'desc' : 'asc';
+
+		if ( isset( $columns[ $col_index ] ) && $columns[ $col_index ] ) {
+			return array( $columns[ $col_index ], $dir );
+		}
+
+		return array( $default_key, $default_dir );
+	}
+
 	public static function ajax_save_class() {
 		self::verify_request();
 
@@ -548,11 +586,18 @@ class WPES_Admin {
 		$status = sanitize_key( $_POST['status_filter'] ?? '' );
 		$page   = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 0 => 'name', 1 => 'email', 3 => 'status' ),
+			'name'
+		);
+
 		$args = array(
-			'search'   => $search,
-			'status'   => $status,
-			'per_page' => $length,
-			'page'     => $page,
+			'search'    => $search,
+			'status'    => $status,
+			'per_page'  => $length,
+			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		$total    = WPES_Teachers::count_query( $search, $status );
@@ -854,8 +899,25 @@ class WPES_Admin {
 				}
 			);
 		}
+		$all = array_values( $all );
+
+		// Backend table sorting (Final Acceptance review, 2026-09-11): this
+		// list comes back as a plain PHP array (not a paged SQL query), so
+		// sort it here before slicing to the current page.
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 0 => 'name', 1 => 'description', 2 => 'status' ),
+			'name'
+		);
+		usort(
+			$all,
+			function ( $a, $b ) use ( $order_by, $order_dir ) {
+				$cmp = strcasecmp( (string) $a->{$order_by}, (string) $b->{$order_by} );
+				return 'desc' === $order_dir ? -$cmp : $cmp;
+			}
+		);
+
 		$total    = count( $all );
-		$slice    = array_slice( array_values( $all ), $start, $length );
+		$slice    = array_slice( $all, $start, $length );
 		$data     = array();
 
 		foreach ( $slice as $class ) {
@@ -892,12 +954,19 @@ class WPES_Admin {
 		$status   = sanitize_key( $_POST['status_filter'] ?? '' );
 		$page     = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 0 => 'class_name', 1 => 'title', 2 => 'starts_at_gmt', 5 => 'teacher_name', 6 => 'status' ),
+			'starts_at_gmt'
+		);
+
 		$args = array(
-			'search'   => $search,
-			'class_id' => $class_id,
-			'status'   => $status,
-			'per_page' => $length,
-			'page'     => $page,
+			'search'    => $search,
+			'class_id'  => $class_id,
+			'status'    => $status,
+			'per_page'  => $length,
+			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		$total    = WPES_Sessions::count_query( $args );
@@ -954,11 +1023,28 @@ class WPES_Admin {
 		$tab      = sanitize_key( $_POST['tab_filter'] ?? 'active' );
 		$page     = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array(
+				0 => 'customer_name',
+				1 => 'customer_email',
+				2 => 'class_name',
+				3 => 'session_title',
+				4 => 'starts_at_gmt',
+				5 => 'status',
+				6 => 'order_id',
+				7 => 'created_at',
+			),
+			'created_at',
+			'desc'
+		);
+
 		$args = array(
-			'search'   => $search,
-			'class_id' => $class_id,
-			'per_page' => $length,
-			'page'     => $page,
+			'search'    => $search,
+			'class_id'  => $class_id,
+			'per_page'  => $length,
+			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		if ( 'pending' === $tab ) {
@@ -1043,11 +1129,19 @@ class WPES_Admin {
 		$form_name = sanitize_text_field( wp_unslash( $_POST['form_filter'] ?? '' ) );
 		$page      = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 1 => 'name', 2 => 'email', 3 => 'form_name', 5 => 'created_at' ),
+			'created_at',
+			'desc'
+		);
+
 		$args = array(
 			'search'    => $search,
 			'form_name' => $form_name,
 			'per_page'  => $length,
 			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		$total   = WPES_Waitlist::count( $args );
@@ -1121,11 +1215,19 @@ class WPES_Admin {
 		$status = sanitize_key( $_POST['status_filter'] ?? '' );
 		$page   = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 1 => 'teacher_name', 2 => 'status', 3 => 'created_at', 4 => 'expires_at', 5 => 'responded_at' ),
+			'created_at',
+			'desc'
+		);
+
 		$args = array(
-			'search'   => $search,
-			'status'   => $status,
-			'per_page' => $length,
-			'page'     => $page,
+			'search'    => $search,
+			'status'    => $status,
+			'per_page'  => $length,
+			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		$total   = WPES_Teacher_Invites::count_query( $search, $status );
@@ -1172,11 +1274,19 @@ class WPES_Admin {
 		$status = sanitize_key( $_POST['status_filter'] ?? '' );
 		$page   = (int) floor( $start / $length ) + 1;
 
+		list( $order_by, $order_dir ) = self::get_datatable_order(
+			array( 0 => 'customer_name', 2 => 'status', 3 => 'created_at' ),
+			'created_at',
+			'desc'
+		);
+
 		$args = array(
-			'search'   => $search,
-			'status'   => $status,
-			'per_page' => $length,
-			'page'     => $page,
+			'search'    => $search,
+			'status'    => $status,
+			'per_page'  => $length,
+			'page'      => $page,
+			'order_by'  => $order_by,
+			'order_dir' => $order_dir,
 		);
 
 		$total   = WPES_Replacements::count_query( $search, $status );

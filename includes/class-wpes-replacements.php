@@ -264,6 +264,11 @@ class WPES_Replacements {
 		$sessions_table = WPES_DB::sessions_table();
 		$classes_table  = WPES_DB::classes_table();
 
+		// Backend table sorting (Final Acceptance review, 2026-09-11).
+		$allowed   = array( 'customer_name' => 'rc.customer_name', 'status' => 'rc.status', 'created_at' => 'rc.created_at' );
+		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 'rc.created_at';
+		$order_dir = ( isset( $args['order_dir'] ) && 'asc' === strtolower( $args['order_dir'] ) ) ? 'ASC' : 'DESC';
+
 		$sql = "SELECT rc.*,
 				src.title AS source_title, src.starts_at_gmt AS source_starts_at_gmt, src_c.name AS source_class_name,
 				used.title AS used_title, used.starts_at_gmt AS used_starts_at_gmt, used_c.name AS used_class_name
@@ -273,7 +278,7 @@ class WPES_Replacements {
 			LEFT JOIN {$sessions_table} used ON used.id = rc.used_session_id
 			LEFT JOIN {$classes_table} used_c ON used_c.id = used.class_id
 			WHERE {$where_sql}
-			ORDER BY rc.created_at DESC
+			ORDER BY {$order_col} {$order_dir}
 			LIMIT %d OFFSET %d";
 
 		$params[] = $per_page;

@@ -1644,3 +1644,176 @@ OPEN ITEMS FOR THE CLIENT:
     on, then one or two real test-mode checkouts — see the 17:17 and
     16:43 UTC entries above for exact detail).
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-11
+FILE(S):
+  - wp-exam-success.php                              (version bump 1.9.1 -> 1.9.2)
+  - includes/class-wpes-payments.php                  (modified)
+  - includes/class-wpes-meeting-links.php              (modified)
+  - includes/class-wpes-teachers.php                  (modified)
+  - includes/class-wpes-sessions.php                  (modified)
+  - includes/class-wpes-waitlist.php                  (modified)
+  - includes/class-wpes-teacher-invites.php            (modified)
+  - includes/class-wpes-replacements.php               (modified)
+  - includes/class-wpes-bookings.php                  (modified)
+  - admin/class-wpes-admin.php                        (modified)
+  - admin/js/wpes-admin.js                             (modified)
+  - public/js/wpes-public.js                          (modified)
+
+CHANGE:
+  Fixed all 6 points from the client's "Outstanding Points for Review"
+  document (2026-09-11):
+
+  1+2. Payment Capture Failure - no admin email, and Order status
+     stayed "Completed" (Order #1190). Both bugs traced to one root
+     cause, confirmed by reading Order #1190's own order notes and
+     WooPayments' own source on staging
+     (class-wc-payments-order-service.php): when WooPayments'
+     capture_authorization_on_order_status_change() genuinely fails to
+     capture, it ONLY adds an order note - it never touches the WC
+     order status or its own _intention_status meta. This plugin's
+     maybe_capture_package_payment() had already set the order to
+     "Completed" before WooPayments' own capture attempt ran (same
+     hook chain), so re-checking the order status afterward saw
+     "Completed" regardless of whether the real charge succeeded - a
+     false positive that both skipped the admin-email branch entirely
+     AND left the order sitting at a status implying successful
+     payment. Fixed by cross-checking WooPayments' own
+     _intention_status meta (reliably "succeeded" only on a genuine
+     success, confirmed via its source) as a second, more precise
+     signal, with automatic fallback to status-only checking for any
+     other gateway that doesn't use this meta convention (so this
+     stays gateway-agnostic per the original design). On a confirmed
+     failure, the order is now also actively reverted to "On hold"
+     (previously missing entirely - the old code only skipped marking
+     it captured, but never corrected the visible order status), and
+     the existing admin-notification email now actually fires because
+     the failure branch is finally reached. Verified the revert-to-
+     on-hold call cannot cascade and downgrade a DIFFERENT session's
+     already-confirmed booking on the same multi-session package back
+     to on-hold: WPES_Bookings::mark_on_hold_by_order() only ever
+     touches bookings still in 'pending' status, never 'confirmed'
+     ones, so per-session independence (Developer Spec section 8) is
+     intact.
+
+  3. Admin Notification Email - configuration. Documented, not a code
+     change (the Settings field itself already shipped 2026-09-10, see
+     the 17:35 UTC entry that day): Settings > Booking Settings >
+     "Teacher Assignment" section > "Admin Notification Email" field
+     is the actual address used by both admin alert emails (no-teacher-
+     response and payment-capture-failed) - confirmed by re-reading
+     WPES_Emailer::get_admin_notification_email() directly. Leave it
+     blank to fall back to the site's normal WordPress admin email.
+     The wpes_admin_notification_email filter still exists and runs
+     last, so it always wins if a developer hooks it - but it is NOT
+     required for normal use; the Settings field alone is sufficient
+     and is the intended, supported way to set this going forward.
+
+  4. Booking Page - initial session selection lost. Root cause in
+     public/js/wpes-public.js: toggleSession() discarded the clicked
+     session ID outright when no package was selected yet, and
+     selectPackage() unconditionally reset state.selectedSessions to
+     an empty array with no memory of what was clicked. Fixed by
+     recording the click in a new state.pendingSessionId before
+     opening the package modal; selectPackage() now consumes it and
+     pushes that session back in as the first selection (respecting
+     the chosen package's own session-count/type rules exactly like a
+     normal click would), then clears it. Also cleared on modal
+     dismiss (X / backdrop) so a stale pending click can't resurface
+     later against an unrelated package choice.
+
+  5. Backend - table sorting. Confirmed by reading every
+     ajax_datatable_*() handler in admin/class-wpes-admin.php: none of
+     them ever read DataTables' own "order" request parameter, so
+     clicking a sortable column heading changed nothing in the
+     Classes, Teachers, Sessions, Bookings, Waitlist, Teacher Invites,
+     and Replacement Credits admin tables (Bookings had unused partial
+     support already wired one layer down that was simply never
+     called). Added a shared WPES_Admin::get_datatable_order() helper
+     that reads the column index + direction DataTables actually sends
+     and maps it to the DB column each table's model class understands
+     (a per-table whitelist, so no arbitrary column name ever reaches
+     SQL); wired it into all 7 handlers and added order_by/order_dir
+     support to the model query methods that didn't already have it
+     (Teachers, Sessions, Waitlist, Teacher Invites, Replacement
+     Credits - extended Bookings' existing whitelist to cover every
+     sortable column instead of just 4). Columns with no single
+     sortable DB value behind them (Actions, computed capacity/
+     meeting-link cells, concatenated joined previews like "Session" or
+     "Source Session") are explicitly marked orderable:false in
+     admin/js/wpes-admin.js instead of being fake-sorted.
+
+  6. Teacher Communication - no meeting-link email after acceptance.
+     Root cause in includes/class-wpes-meeting-links.php:
+     send_for_session() - the method the plugin auto-calls right after
+     a teacher is assigned/accepts - only ever built its recipient
+     list from confirmed attendees; it never once considered the
+     assigned teacher, so a teacher who used their Accept-Link got the
+     acceptance confirmation page but no separate meeting-link email,
+     with no path to ever receive one (even the existing admin
+     "Resend" button calls this same method). Fixed by looking up the
+     session's assigned teacher and, when one exists with an email on
+     file, sending them their own "meeting link to host" email
+     alongside the attendee emails - refactored build_email_body() to
+     take a recipient name plus an is_host flag so the wording is
+     correct for either audience from the same template.
+
+REASON:
+  Client's "Outstanding Points for Review" document (2026-09-11), sent
+  after their live checks on the previous round's reported-complete
+  items - 6 points required before their final counter-check and
+  acceptance decision.
+
+VERIFIED:
+  - php -l clean on every touched PHP file; node --check clean on
+    both touched JS files.
+  - All 12 files uploaded via FTP, re-downloaded and diffed
+    byte-for-byte (SHA-256) against local - clean on every file.
+  - No fatal errors: front page and the live "schedule-booking" page
+    both load clean (HTTP 200, no "Fatal error" in the response), both
+    JS files serve 200 directly from staging.
+  - Item 5 (table sorting) - live-verified against the real staging
+    database, authenticated as an actual admin session (not just code
+    review): sent real DataTables AJAX requests with different
+    order[0][column]/dir combinations directly to admin-ajax.php and
+    confirmed genuinely different, correctly ordered results for
+    Classes (sort by Name), Teachers (sort by Email), Sessions (sort
+    by Class and by Starts date), Waitlist (sort by Name), and
+    Bookings (sort by Booked On) - both ascending and descending, each
+    returning visibly reordered rows.
+  - Item 6 (teacher meeting-link email) - live-verified for real:
+    triggered the existing admin "Resend" action against a real
+    session with a real assigned teacher (#47, already archived test
+    data from an earlier round, so no real customer was touched) and
+    confirmed directly in the WP Mail Logging log that a new email
+    fired at 2026-09-11 14:27 UTC, subject "Meeting link to host
+    Listening + Speaking - Exam Success", to
+    michaelchrfr+teacherA@gmail.com - the assigned teacher's own
+    address, which never received a meeting-link email before this
+    fix. recipient_count returned 6 (previously would have excluded
+    the teacher entirely).
+  - Item 4 (session selection) - code-reviewed and syntax-checked
+    (node --check); the state-machine logic was traced end-to-end
+    against the exact functions involved (toggleSession,
+    openPackageModal, selectPackage, closePackageModal). Not driven
+    through an actual browser click - recommend this gets exercised as
+    part of the client's own upcoming end-to-end counter-check.
+  - Items 1+2 (payment capture failure) - the fix is grounded in
+    Order #1190's own real order notes and WooPayments' own source
+    read directly on staging, not speculation. Re-triggering a genuine
+    gateway capture failure on demand isn't practical (it requires an
+    actual Stripe-side decline at the exact capture moment); this
+    remains code-fixed and reasoned from real evidence, same
+    disclosure as the 2026-09-10 entry for the original version of
+    this safety logic.
+
+OPEN ITEMS FOR THE CLIENT:
+  - None of the 6 points require further input to use as shipped.
+  - Items 1, 2, and 4 would benefit from being included in the
+    client's own end-to-end counter-check (a real declined test
+    capture for 1/2; an actual click-through of "select a session,
+    then choose a package" for 4) since they could not be safely
+    re-triggered live from this side without either a real gateway
+    decline or a browser session.
+------------------------------------------------------------

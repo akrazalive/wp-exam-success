@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-10 (latest: Final Acceptance Testing — Live Verification Round, see below)
+**Last updated:** 2026-09-11 (latest: Outstanding Points for Review, see below)
 
 ## Legend
 
@@ -25,6 +25,23 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Outstanding Points for Review (2026-09-11)
+
+Client's "Outstanding Points for Review" document, sent after their own live checks on the previous round's reported-complete items — 6 points, all now fixed, deployed, and (where it could be done safely from this side) live-verified. Full detail in `CHANGE_LOG.txt`'s 2026-09-11 entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Payment Capture Failure — no admin email | ✅ **Fixed.** Root cause: this plugin's own code set the order to "Completed" before WooPayments' capture attempt even ran, so the post-attempt status check was a false positive that skipped the email branch. Now cross-checks WooPayments' own `_intention_status` meta as a second signal. |
+| 2 | Payment Capture Failure — Order status stayed "Completed" | ✅ **Fixed.** Same root cause as #1 — the order is now actively reverted to "On hold" on a confirmed capture failure, which the old code never did. Verified this can't cascade and undo a different session's already-confirmed booking on the same package. |
+| 3 | Admin Notification Email — configuration | ✅ **Documented** (no code change needed — the field already shipped 2026-09-10). Settings > Booking Settings > "Teacher Assignment" > "Admin Notification Email"; blank falls back to the site's normal admin email; the `wpes_admin_notification_email` filter still works and wins if hooked, but isn't required. |
+| 4 | Booking Page — initial session selection lost | ✅ **Fixed.** `public/js/wpes-public.js` now remembers the session clicked before a package was chosen (`state.pendingSessionId`) and carries it into the newly-selected package as the first session. Code-reviewed + syntax-checked; not driven through an actual browser click this round. |
+| 5 | Backend — table sorting | ✅ **Fixed, live-verified.** None of the 7 admin DataTables handlers ever read DataTables' own `order` parameter. Added a shared column-index-to-DB-column whitelist helper, wired into all 7 tables; columns with no single sortable value (Actions, computed cells, concatenated joins) explicitly marked unsortable instead of faked. Live-verified against the real staging DB via authenticated AJAX requests for Classes, Teachers, Sessions, Waitlist, and Bookings — genuinely different, correctly ordered results both ascending and descending. |
+| 6 | Teacher Communication — no meeting-link email after acceptance | ✅ **Fixed, live-verified.** `WPES_Meeting_Links::send_for_session()` never considered the assigned teacher as a recipient, only confirmed attendees. Now sends the teacher their own "meeting link to host" email. Live-verified: triggered the existing admin "Resend" action against a real assigned-teacher session and confirmed a new email actually arrived in the mail log, addressed to the teacher, with host-specific subject wording. |
+
+Version bumped 1.9.1 → 1.9.2 (no schema change).
 
 ---
 

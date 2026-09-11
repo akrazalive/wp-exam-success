@@ -210,7 +210,20 @@ class WPES_Bookings {
 
 		$order_col = isset( $args['order_by'] ) ? sanitize_key( $args['order_by'] ) : 'created_at';
 		$order_dir = ( isset( $args['order_dir'] ) && 'asc' === strtolower( $args['order_dir'] ) ) ? 'ASC' : 'DESC';
-		$allowed   = array( 'created_at' => 'b.created_at', 'starts_at_gmt' => 's.starts_at_gmt', 'customer_name' => 'b.customer_name', 'status' => 'b.status' );
+		// Backend table sorting (Final Acceptance review, 2026-09-11): added
+		// customer_email/class_name/session_title/order_id so every sortable
+		// column in the admin Bookings table (not just the four already
+		// supported here) genuinely sorts.
+		$allowed   = array(
+			'created_at'     => 'b.created_at',
+			'starts_at_gmt'  => 's.starts_at_gmt',
+			'customer_name'  => 'b.customer_name',
+			'customer_email' => 'b.customer_email',
+			'class_name'     => 'c.name',
+			'session_title'  => 's.title',
+			'order_id'       => 'b.order_id',
+			'status'         => 'b.status',
+		);
 		$order_sql = $allowed[ $order_col ] ?? 'b.created_at';
 
 		$sql = "
