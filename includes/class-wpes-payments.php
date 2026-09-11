@@ -93,6 +93,124 @@ class WPES_Payments {
 	const GATEWAY_INTENT_SUCCESS_VALUE = 'succeeded';
 
 	/**
+	 * Register the manual "Retry payment capture" WooCommerce order
+	 * action (Outstanding Points for Review follow-up, 2026-09-11 —
+	 * client re-checked Order #1190 after the capture-failure fix above
+	 * and found it *still* sitting at "Completed" with no admin email).
+	 *
+	 * Root cause of that specific complaint: the automatic retry this
+	 * class promises in its failure order note ("will retry
+	 * automatically the next time a session on this order confirms")
+	 * only actually happens if there IS a next session — for a package
+	 * where every session had already independently confirmed by the
+	 * time the capture failed (Order #1190's case: the failure was on
+	 * the package's own only/last remaining trigger), there is no
+	 * future confirmation left to ever call maybe_capture_package_
+	 * payment() again, so the order is stuck exactly as found — not
+	 * because today's status/email fix doesn't work, but because
+	 * nothing ever calls it again for that specific order. Confirmed by
+	 * checking Order #1190 directly: no new order notes since the
+	 * original failure, still 'completed', because it predates this
+	 * fix entirely and nothing has re-triggered it since.
+	 *
+	 * This gives admins (and this project's own testing) a real,
+	 * always-available way to retry, instead of only an automatic path
+	 * that silently has no next trigger for some packages.
+	 */
+	public static function init() {
+		add_filter( 'woocommerce_order_actions', array( __CLASS__, 'add_retry_order_action' ), 10, 2 );
+		add_action( 'woocommerce_order_action_wpes_retry_payment_capture', array( __CLASS__, 'handle_retry_order_action' ) );
+	}
+
+	/**
+	 * @param array    $actions
+	 * @param WC_Order $order
+	 * @return array
+	 */
+	public static function add_retry_order_action( $actions, $order ) {
+		if ( ! $order instanceof WC_Order || self::is_captured( $order ) ) {
+			return $actions;
+		}
+		// Only relevant for orders this class actually deals with: still
+		// on-hold awaiting capture, or stuck at completed/processing
+		// without ever having been confirmed captured (the exact
+		// pre-existing-bug state Order #1190 is in).
+		if ( ! in_array( $order->get_status(), array( 'on-hold', 'completed', 'processing' ), true ) ) {
+			return $actions;
+		}
+		$actions['wpes_retry_payment_capture'] = __( 'WP Exam Success: retry payment capture', 'wp-exam-success' );
+		return $actions;
+	}
+
+	/**
+	 * @param WC_Order $order
+	 */
+	public static function handle_retry_order_action( $order ) {
+		if ( ! $order instanceof WC_Order ) {
+			return;
+		}
+		self::retry_capture_manually( $order->get_id() );
+	}
+
+	/**
+	 * Manual, admin-initiated retry — the "Retry payment capture" order
+	 * action above, and reusable from anywhere else in the admin
+	 * (e.g. a future button on the Bookings screen) via the order ID
+	 * alone. Unlike maybe_capture_package_payment()'s automatic path,
+	 * this is allowed to run against an order already sitting at
+	 * 'completed'/'processing' with no confirmed capture — the exact
+	 * state a pre-existing capture failure can leave an order in when
+	 * there's no future session confirmation left to naturally retry it.
+	 *
+	 * @param int $order_id
+	 * @return true|WP_Error True if a capture attempt just ran (check
+	 *                       is_captured() afterward for the outcome —
+	 *                       failure is reported the normal way, via the
+	 *                       order note + admin email), or WP_Error if
+	 *                       there was nothing valid to retry.
+	 */
+	public static function retry_capture_manually( $order_id ) {
+		$order = wc_get_order( $order_id );
+		if ( ! $order instanceof WC_Order ) {
+			return new WP_Error( 'wpes_order_not_found', __( 'Order not found.', 'wp-exam-success' ) );
+		}
+
+		if ( self::is_captured( $order ) ) {
+			return new WP_Error( 'wpes_already_captured', __( 'This order\'s package payment is already marked captured — nothing to retry.', 'wp-exam-success' ) );
+		}
+
+		$status = $order->get_status();
+
+		if ( in_array( $status, array( 'completed', 'processing' ), true ) ) {
+			// Stuck state: this class itself set this status on a prior
+			// attempt, but never confirmed the capture actually went
+			// through, and nothing since has retried it. Correct the
+			// status back to on-hold first — same correction the
+			// automatic path now makes for itself on a fresh failure —
+			// so the normal capture attempt below has a real on-hold
+			// order to work from, exactly like the automatic trigger
+			// expects.
+			$order->add_order_note(
+				__( 'WP Exam Success: manual retry requested — this order was sitting at a status implying successful payment, but the package payment was never confirmed captured. Reverting to On hold before retrying.', 'wp-exam-success' )
+			);
+			$order->update_status( 'on-hold', __( 'WP Exam Success: manual capture retry.', 'wp-exam-success' ) );
+		} elseif ( 'on-hold' !== $status ) {
+			return new WP_Error(
+				'wpes_not_retryable',
+				sprintf(
+					/* translators: %s: current order status */
+					__( 'This order is not in a state this can retry (current status: %s).', 'wp-exam-success' ),
+					$status
+				)
+			);
+		}
+
+		self::maybe_capture_package_payment( $order_id, 0, true );
+
+		return true;
+	}
+
+	/**
 	 * Capture this order's pre-authorized package payment, if it's
 	 * actually awaiting one — called once a session on this order
 	 * reaches its minimum participants and gets a teacher assigned.
@@ -101,11 +219,14 @@ class WPES_Payments {
 	 * package): only the first call that finds the order genuinely
 	 * on-hold does anything; every call after that is a no-op.
 	 *
-	 * @param WC_Order|int $order      Order or order ID.
-	 * @param int          $session_id The session that just confirmed (for the audit trail).
+	 * @param WC_Order|int $order          Order or order ID.
+	 * @param int          $session_id     The session that just confirmed (for the audit trail).
+	 * @param bool         $is_manual_retry True when called from retry_capture_manually() rather
+	 *                                       than an automatic session-confirmation trigger — only
+	 *                                       changes the wording of the order notes written below.
 	 * @return bool True if a capture was just triggered, false otherwise.
 	 */
-	public static function maybe_capture_package_payment( $order, $session_id = 0 ) {
+	public static function maybe_capture_package_payment( $order, $session_id = 0, $is_manual_retry = false ) {
 		if ( is_numeric( $order ) ) {
 			$order = wc_get_order( $order );
 		}
@@ -124,7 +245,11 @@ class WPES_Payments {
 		// isn't enabled on the gateway" (order already went straight to
 		// processing/completed at checkout, nothing to do here) and "this
 		// order was already resolved another way" — either way, safe to
-		// no-op rather than force a status change.
+		// no-op rather than force a status change. (A manual retry that
+		// needed to recover a stuck completed/processing order already
+		// reverted it to on-hold before calling this, in retry_capture_
+		// manually() above, so this guard stays exactly as strict as
+		// before for the automatic path.)
 		if ( 'on-hold' !== $order->get_status() ) {
 			return false;
 		}
@@ -158,13 +283,19 @@ class WPES_Payments {
 
 		$order_id = $order->get_id();
 
-		$order->add_order_note(
-			sprintf(
-				/* translators: %d: session ID */
-				__( 'WP Exam Success: session #%d reached its minimum participants and a teacher was assigned — attempting to capture the pre-authorized package payment now.', 'wp-exam-success' ),
-				(int) $session_id
-			)
-		);
+		if ( $is_manual_retry ) {
+			$order->add_order_note(
+				__( 'WP Exam Success: manually retrying the pre-authorized package payment capture now.', 'wp-exam-success' )
+			);
+		} else {
+			$order->add_order_note(
+				sprintf(
+					/* translators: %d: session ID */
+					__( 'WP Exam Success: session #%d reached its minimum participants and a teacher was assigned — attempting to capture the pre-authorized package payment now.', 'wp-exam-success' ),
+					(int) $session_id
+				)
+			);
+		}
 
 		// This status transition is the actual trigger. It deliberately
 		// does not call any gateway-specific capture method — see the
@@ -231,10 +362,19 @@ class WPES_Payments {
 		}
 
 		if ( $fresh_order ) {
+			// Deliberately does NOT promise this retries "automatically" —
+			// confirmed via a real stuck order (client re-check, 2026-09-11)
+			// that this is only true if another session on the same order
+			// still has a future confirmation left to fire the trigger;
+			// for a package where this was the last/only session, nothing
+			// would ever call this again on its own. Points at the real,
+			// always-available fix instead: the "WP Exam Success: retry
+			// payment capture" action in this order's own Order actions
+			// dropdown (added alongside this note, see WPES_Payments::init()).
 			$fresh_order->add_order_note(
 				sprintf(
 					/* translators: 1: session ID, 2: resulting order status, 3: gateway intent status or "n/a" */
-					__( 'WP Exam Success: payment capture for session #%1$d did not complete — order status was "%2$s" and the gateway intent status is "%3$s" (expected "succeeded"). Reverted to On hold and will retry automatically the next time a session on this order confirms; admin has been notified.', 'wp-exam-success' ),
+					__( 'WP Exam Success: payment capture for session #%1$d did not complete — order status was "%2$s" and the gateway intent status is "%3$s" (expected "succeeded"). Reverted to On hold; admin has been notified. Will retry automatically if another session on this order still confirms later — otherwise, use "WP Exam Success: retry payment capture" from this order\'s Order actions dropdown.', 'wp-exam-success' ),
 					(int) $session_id,
 					$final_status,
 					$gateway_meta_present ? $intention_status : 'n/a'

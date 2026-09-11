@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-11 (latest: Outstanding Points for Review, see below)
+**Last updated:** 2026-09-11 (latest: Outstanding Points for Review — client re-check follow-up, see below)
 
 ## Legend
 
@@ -25,6 +25,20 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Outstanding Points for Review — client re-check follow-up (2026-09-11)
+
+Client re-checked Order #1190 (item 1/2 fix, above) and ran a fresh on-hold E2E test; both hit the same payment-capture step and reported it still broken. Investigated live rather than assuming the earlier fix was wrong. Full detail in `CHANGE_LOG.txt`'s 2026-09-11 (follow-up) entry.
+
+**What was actually found:** Order #1190 is the same historical order from before the fix — nothing new has run against it, because the automatic retry the fix relies on ("retry next time a session confirms") never had a next session to trigger it for this specific order. Deeper investigation also found a third, previously-undiscovered symptom of the original bug: this plugin's own "captured" flag had been wrongly set to "yes" on Order #1190 even though WooPayments' own record shows the payment was never actually captured. A full scan confirmed this is the *only* order with that specific mismatch.
+
+**What was fixed and deployed:** a real, always-available "WP Exam Success: retry payment capture" action added to the standard WooCommerce order actions dropdown, so a stuck order is never dependent on a future session confirmation that might not exist. Version 1.9.2 → 1.9.3.
+
+**What was deliberately NOT done:** Order #1190 itself was not modified — its wrong "captured" flag is still set, and no capture retry was attempted against it. Correcting the flag is safe (bookkeeping only); actually retrying the capture is a real WooPayments/Stripe action and needs the client's explicit decision first, not something to do automatically as part of a code fix.
+
+**Still needed from the client:** the content of items 7-10, referenced as "the attached document" in their message but not included in the message text received.
 
 ---
 

@@ -1817,3 +1817,107 @@ OPEN ITEMS FOR THE CLIENT:
     re-triggered live from this side without either a real gateway
     decline or a browser session.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-11 (follow-up)
+FILE(S):
+  - wp-exam-success.php                              (version bump 1.9.2 -> 1.9.3)
+  - includes/class-wpes-payments.php                  (modified)
+
+CHANGE:
+  Client re-checked Order #1190 after the items-1/2 fix (previous
+  entry) and reported it was STILL sitting at "Completed" with no
+  admin email, and reported a separate fresh end-to-end test also
+  getting stuck at the payment-capture step. Investigated live on
+  staging rather than assuming the earlier fix was wrong:
+
+  1. Confirmed Order #1190 is the SAME historical order from before
+     the fix (its order notes are still exactly the original 7 from
+     2026-09-11 16:03-16:37 site time — nothing new has run against
+     it), not a fresh capture-failure test. Root cause: the automatic
+     retry the previous fix's order note promised ("will retry
+     automatically the next time a session on this order confirms")
+     only actually happens if there IS a future session confirmation
+     left on that order — Order #1190's package had already had every
+     session independently confirm by the time the capture failed, so
+     there was never going to be another trigger. The fix from the
+     previous entry is correct for NEW failures going forward, but had
+     no way to ever re-run against this specific already-stuck order.
+
+  2. Added a real, always-available manual retry: a new "WP Exam
+     Success: retry payment capture" entry in the standard WooCommerce
+     order actions dropdown (Order edit screen > Order actions),
+     backed by a new WPES_Payments::retry_capture_manually(). Available
+     on any order sitting on-hold-awaiting-capture, or stuck at
+     completed/processing without a confirmed capture (safely reverts
+     such an order to on-hold first, then retries) — closes the real
+     gap the client's re-check exposed: there was previously no way to
+     retry a capture that had no future session confirmation to lean
+     on. The old failure order note's wording was also corrected to
+     stop overpromising an automatic retry that may not exist for a
+     given package, and points at this new action instead.
+
+  3. Deeper investigation of Order #1190 while diagnosing this (a
+     temporary, capability-gated, read-only-first diagnostic endpoint
+     was used and removed immediately after — see VERIFIED) surfaced a
+     THIRD, previously-undiscovered symptom of the same original root
+     cause: this plugin's own "_wpes_captured" internal flag was
+     ALSO wrongly set to "yes" on Order #1190 by the pre-fix bug (in
+     addition to the wrong order status and missing email already
+     fixed) — even though WooPayments' own "_intention_status" meta
+     for this order is still "requires_capture", never "succeeded",
+     confirming the payment was genuinely never captured. A read-only
+     scan of every order this plugin has ever marked captured
+     confirmed Order #1190 is the ONLY one with this specific
+     mismatch — every other captured order's WooPayments intent status
+     genuinely says "succeeded" (or the order used a non-WooPayments
+     gateway with no intent-status meta to cross-check, the expected,
+     harmless case). Today's earlier fix already prevents this
+     specific flag from ever being wrongly set again for any NEW
+     capture attempt (it's exactly what the GATEWAY_INTENT_STATUS_META
+     cross-check added earlier today is for) — this is purely a
+     leftover from before that fix existed.
+
+REASON:
+  Client's live re-check (2026-09-11) of Order #1190 and of a fresh
+  on-hold end-to-end test, both blocked at the same payment-capture
+  step.
+
+VERIFIED:
+  - php -l clean; wp-exam-success.php and class-wpes-payments.php
+    uploaded via FTP and byte-diffed (SHA-256) clean against local.
+  - No fatal errors: front page and Order #1190's own edit screen both
+    load clean (HTTP 200) after deploy.
+  - The "no future trigger" root cause for Order #1190 was confirmed
+    directly, not assumed: its order notes were re-read live and are
+    unchanged since the original 2026-09-11 16:37 entries.
+  - The new retry order action was confirmed correctly wired (a
+    temporary, admin-capability-gated diagnostic AJAX endpoint
+    confirmed both the filter and action hook are registered, and
+    exercised the exact filter callback against Order #1190's real
+    data) and confirmed it correctly does NOT offer itself on an order
+    already genuinely marked captured — which is exactly why it
+    doesn't yet appear on Order #1190 (see next point). The diagnostic
+    endpoint was temporary, read-only for every order except a single
+    explicit, unused correction handler that was written but
+    deliberately never invoked, and was removed from staging
+    immediately after use — it is not part of the plugin.
+  - The "_wpes_captured = yes but intention_status = requires_capture"
+    mismatch on Order #1190 was confirmed directly against live order
+    meta, and a full scan (read-only, every order this plugin has ever
+    marked captured) confirmed it is the only order affected.
+
+OPEN ITEMS FOR THE CLIENT:
+  - Order #1190 itself was deliberately NOT modified as part of this
+    entry — its internal "captured" flag is still wrongly "yes" and
+    its status is still "Completed", and no capture retry was
+    attempted against it. Correcting the stale internal flag is a
+    safe, non-financial bookkeeping fix; actually retrying the capture
+    is a real WooPayments/Stripe action and needs an explicit decision
+    from the client (or Asif with the client's sign-off) before it
+    runs, rather than being done automatically as part of a code fix.
+    See the chat response accompanying this entry for the two options.
+  - Items 7-10 referenced in the client's message (an attached
+    document) were not included in the message text received — cannot
+    be addressed until that content is provided.
+------------------------------------------------------------
