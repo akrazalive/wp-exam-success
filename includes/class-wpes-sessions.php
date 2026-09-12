@@ -271,6 +271,12 @@ class WPES_Sessions {
 
 		list( $where_sql, $params ) = self::build_query_where( $args, 's', 'c' );
 
+		// Client-reported bug (2026-09-12): see the matching note on the
+		// subquery below — this "now" value fills the placeholder there,
+		// and must be first in $params since that subquery appears before
+		// $where_sql in the query text.
+		$params = array_merge( array( WPES_DB::now_gmt() ), $params );
+
 		if ( ! empty( $args['session_ids'] ) && is_array( $args['session_ids'] ) ) {
 			$placeholders = implode( ',', array_fill( 0, count( $args['session_ids'] ), '%d' ) );
 			$where_sql   .= " AND s.id IN ({$placeholders})";
@@ -302,6 +308,13 @@ class WPES_Sessions {
 		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 's.starts_at_gmt';
 		$order_dir = ( isset( $args['order_dir'] ) && 'desc' === strtolower( $args['order_dir'] ) ) ? 'DESC' : 'ASC';
 
+		// Client-reported bug (2026-09-12): "booked" here previously
+		// excluded 'on-hold' bookings (see get_calendar()'s docblock for
+		// the full explanation) — fixed to match WPES_Bookings::reserve()'s
+		// own definition of "occupies a seat" exactly, so this table's
+		// numbers and the only_with_capacity picker (WPES_My_Account's
+		// replacement-credit session list) can't disagree with what
+		// checkout will actually allow.
 		$sql = "
 			SELECT s.*, c.name AS class_name, t.name AS teacher_name,
 				COALESCE(b.booked, 0) AS booked,
@@ -312,7 +325,7 @@ class WPES_Sessions {
 			LEFT JOIN (
 				SELECT session_id, COUNT(*) AS booked
 				FROM {$bookings_table}
-				WHERE status IN ('pending', 'confirmed')
+				WHERE status IN ('confirmed','on-hold') OR ( status = 'pending' AND reserved_until > %s )
 				GROUP BY session_id
 			) b ON b.session_id = s.id
 			WHERE {$where_sql}
@@ -339,6 +352,8 @@ class WPES_Sessions {
 		$bookings_table = WPES_DB::bookings_table();
 		$classes_table  = WPES_DB::classes_table();
 
+		// Client-reported bug (2026-09-12): see get_calendar()'s docblock —
+		// same on-hold undercount, fixed the same way here.
 		$sql = "
 			SELECT s.*, c.name AS class_name,
 				COALESCE(b.booked, 0) AS booked,
@@ -348,13 +363,13 @@ class WPES_Sessions {
 			LEFT JOIN (
 				SELECT session_id, COUNT(*) AS booked
 				FROM {$bookings_table}
-				WHERE status IN ('pending', 'confirmed')
+				WHERE status IN ('confirmed','on-hold') OR ( status = 'pending' AND reserved_until > %s )
 				GROUP BY session_id
 			) b ON b.session_id = s.id
 			WHERE s.id = %d
 		";
 
-		return $wpdb->get_row( $wpdb->prepare( $sql, (int) $id ) );
+		return $wpdb->get_row( $wpdb->prepare( $sql, WPES_DB::now_gmt(), (int) $id ) );
 	}
 
 	public static function get_calendar( $args = array() ) {
@@ -396,20 +411,37 @@ class WPES_Sessions {
 
 		$where_sql = implode( ' AND ', $where );
 
-		// LEFT JOIN to count bookings, INNER JOIN classes for name
+		// Client-reported bug (2026-09-12): "9/10 shown, but this session
+		// just filled up" at checkout. Root cause: this calendar feed (the
+		// public booking page's own data source) computed "remaining" from
+		// confirmed_count + pending_count only — it never counted 'on-hold'
+		// bookings (a package order authorized and awaiting its first
+		// session's payment capture still occupies a real seat) — while
+		// WPES_Bookings::reserve(), the actual gate at checkout, always
+		// did. A session with on-hold bookings could show more availability
+		// here than reserve() would actually allow, and did — the display
+		// wasn't wrong about seats sold, it just wasn't counting all of
+		// them. on_hold_count is now added and subtracted the same as
+		// confirmed_count, so this matches reserve()'s definition exactly
+		// (pending_count here still counts a cart hold regardless of
+		// whether it has since expired, same as before this fix — the
+		// under-count was specifically the missing on-hold bookings, not
+		// pending's own accounting, so that part is left unchanged).
 		$sql = "SELECT
 				s.*,
 				c.name AS class_name,
 				c.description AS class_description,
 				COALESCE(b.confirmed_count, 0) AS confirmed_count,
 				COALESCE(b.pending_count, 0) AS pending_count,
-				(s.max_attendees - COALESCE(b.confirmed_count, 0) - COALESCE(b.pending_count, 0)) AS remaining
+				COALESCE(b.on_hold_count, 0) AS on_hold_count,
+				(s.max_attendees - COALESCE(b.confirmed_count, 0) - COALESCE(b.pending_count, 0) - COALESCE(b.on_hold_count, 0)) AS remaining
 			FROM {$table} s
 			INNER JOIN {$classes_t} c ON c.id = s.class_id
 			LEFT JOIN (
 				SELECT session_id,
 					SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) AS confirmed_count,
-					SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count
+					SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+					SUM(CASE WHEN status = 'on-hold' THEN 1 ELSE 0 END) AS on_hold_count
 				FROM {$bookings}
 				GROUP BY session_id
 			) b ON b.session_id = s.id
@@ -432,6 +464,7 @@ class WPES_Sessions {
 		$row = self::hydrate_row( $row );
 		$row->confirmed_count = (int) $row->confirmed_count;
 		$row->pending_count   = (int) $row->pending_count;
+		$row->on_hold_count   = (int) $row->on_hold_count;
 		$row->remaining       = (int) $row->remaining;
 		return $row;
 	}
@@ -462,11 +495,23 @@ class WPES_Sessions {
 			return 0;
 		}
 
+		// Client-reported bug (2026-09-12): this feeds has_capacity(), the
+		// pre-checkout validation gate (WPES_WooCommerce::validate_add_to_
+		// cart()) — it previously excluded 'on-hold' bookings the same way
+		// the calendar display did (see get_calendar()'s docblock above),
+		// so a customer could pass this check only to have the stricter,
+		// correct WPES_Bookings::reserve() row-locked count reject them a
+		// moment later with "this session just filled up". Now matches
+		// reserve()'s own definition of "occupies a seat" exactly:
+		// confirmed/on-hold always count, pending only until its temporary
+		// cart-hold expires.
 		$occupied = (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM " . WPES_DB::bookings_table() . "
-				 WHERE session_id = %d AND status IN ('pending','confirmed')",
-				$session_id
+				 WHERE session_id = %d
+				   AND ( status IN ('confirmed','on-hold') OR ( status = 'pending' AND reserved_until > %s ) )",
+				$session_id,
+				WPES_DB::now_gmt()
 			)
 		);
 
@@ -489,11 +534,14 @@ class WPES_Sessions {
 		$sessions_table = WPES_DB::sessions_table();
 		$bookings_table = WPES_DB::bookings_table();
 
+		// Client-reported bug (2026-09-12): see get_calendar()'s docblock —
+		// same on-hold undercount, fixed the same way here.
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT s.max_attendees,
-					(SELECT COUNT(*) FROM {$bookings_table} WHERE session_id = s.id AND status IN ('pending','confirmed')) AS booked
+					(SELECT COUNT(*) FROM {$bookings_table} WHERE session_id = s.id AND ( status IN ('confirmed','on-hold') OR ( status = 'pending' AND reserved_until > %s ) )) AS booked
 				 FROM {$sessions_table} s WHERE s.id = %d",
+				WPES_DB::now_gmt(),
 				$session_id
 			)
 		);

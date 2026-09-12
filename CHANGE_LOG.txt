@@ -2011,3 +2011,93 @@ OPEN ITEMS FOR THE CLIENT:
     decision on whether to actually retry the payment capture — see
     the previous entry and this session's chat response.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-12
+FILE(S):
+  - wp-exam-success.php                              (version bump 1.9.3 -> 1.9.4)
+  - includes/class-wpes-sessions.php                  (modified)
+  - public/js/wpes-public.js                          (modified)
+
+CHANGE:
+  Client's final message listed 2 remaining points:
+
+  1. Initial Session Selection — the green "+" click was reported as
+     "intermittently" still lost after choosing a package, even after
+     the 2026-09-11 fix. Root cause: that fix stored only the clicked
+     session's ID and re-looked it up in state.sessionsData inside
+     selectPackage(). That lookup silently fails if sessionsData is
+     replaced in between — e.g. the automatic timezone-detection
+     reload in initTimezone() firing while the package modal is still
+     open, or a week/date-range change — same session ID, but the
+     array (or the date range it now covers) no longer contains it,
+     and the click is lost with no error. Reproduced this exact
+     scenario in a real Node.js execution of the old logic to confirm
+     it was a genuine gap, not theoretical. Fixed by capturing the
+     full session snapshot (title, class, level, times) at the moment
+     of the click — when it's certain to exist, since the click came
+     from a card built from the current sessionsData — instead of
+     re-looking it up later. selectPackage() now uses that snapshot
+     directly; nothing about it can go stale. Also fixed a related gap
+     found along the way: the "+" button's visual "selected" state
+     never reflected this pending click before a package was chosen
+     (only committed selectedSessions were considered), which could
+     itself invite a customer to click a different session out of
+     confusion — now shows as selected immediately.
+
+  2. Capacity Check Inconsistency — a session showing "9/10" (1 spot
+     shown available) was refused at checkout with "this session just
+     filled up". Root cause: EVERY capacity calculation shown to
+     customers/admins (the public booking calendar, the admin Sessions
+     table, the single-session lookup, and the replacement-credit
+     session picker) counted only 'pending' and 'confirmed' bookings —
+     never 'on-hold' ones. An 'on-hold' booking is a real, live
+     WooCommerce order (payment authorized, awaiting its package's
+     first-session capture) that occupies a genuine seat, but it was
+     invisible everywhere availability is displayed. The actual gate
+     at checkout — WPES_Bookings::reserve()'s row-locked count — always
+     correctly included 'on-hold', so a session with even one on-hold
+     booking could show more room than reserve() would ever allow,
+     and did. Fixed all 5 capacity-computing queries in
+     WPES_Sessions (get_calendar, query, get_with_capacity,
+     get_remaining/has_capacity, count_remaining_capacity) to use the
+     exact same "occupies a seat" definition reserve() already uses:
+     confirmed/on-hold bookings always count, a pending (cart-reserved)
+     booking counts only until its temporary hold expires. Display,
+     pre-checkout validation, and the actual reservation gate can no
+     longer disagree.
+
+REASON:
+  Client's final remaining points before their end-to-end counter-
+  check and acceptance decision.
+
+VERIFIED:
+  - php -l and node --check clean on every touched file. All 3 files
+    uploaded via FTP and byte-diffed (SHA-256) clean against local.
+  - No fatal errors: front page, booking page, checkout, my-account,
+    and the admin Sessions table all load clean (HTTP 200/302 as
+    expected) after deploy.
+  - Item 1: reproduced the OLD logic's failure in a real Node.js
+    execution first (proving the gap was real, not theoretical), then
+    ran the NEW logic through the identical scenario — sessionsData
+    replaced with different data, same session ID no longer present —
+    and confirmed the session still survives into selectedSessions.
+  - Item 2: found what is very likely the client's own exact test
+    session while investigating — session #9 ("Listening + Speaking",
+    displays as 22 September 2026 in the site's local time) had 9
+    confirmed bookings plus exactly 1 on-hold booking (order #1192,
+    "Test fresh0912"). Queried the live wpes_get_calendar public
+    endpoint directly (the real customer-facing data source) both
+    before reasoning through and after deploying the fix: this session
+    now correctly reports "remaining: 0" (max_attendees 10, matching
+    the admin table's now-correct "10/10 — full" badge) instead of the
+    "1 remaining" that produced the client's reported "9/10". This is
+    the actual live discrepancy resolving, not a synthetic test.
+
+OPEN ITEMS FOR THE CLIENT:
+  - None for these 2 points — both fixed and live-verified against
+    real data.
+  - Order #1190 (items 1/2/3 from earlier rounds) still needs the
+    client's explicit decision on whether to actually retry the
+    payment capture.
+------------------------------------------------------------

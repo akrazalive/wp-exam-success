@@ -22,13 +22,29 @@
         filters: { class_id: '', level: '', day: '', time: '', availability: '' },
         package: null,
         selectedSessions: [],
-        // Final Acceptance review (2026-09-11): the session a visitor
-        // clicked to select BEFORE any package was chosen yet. toggleSession()
-        // records it here instead of just discarding it, so selectPackage()
-        // can carry it over as the first selected session once a package is
-        // actually picked — previously the click was silently lost and the
-        // visitor had to click the same session again after choosing a package.
-        pendingSessionId: null,
+        // Final Acceptance review (2026-09-11, hardened 2026-09-12): the
+        // session a visitor clicked to select BEFORE any package was chosen
+        // yet. toggleSession() records it here instead of just discarding
+        // it, so selectPackage() can carry it over as the first selected
+        // session once a package is actually picked — previously the click
+        // was silently lost and the visitor had to click the same session
+        // again after choosing a package.
+        //
+        // Client re-reported this as "intermittently" still lost
+        // (2026-09-12) after the first fix, which stored only the session
+        // ID and re-looked it up in state.sessionsData inside
+        // selectPackage(). That lookup can fail if sessionsData is
+        // replaced in between (e.g. the automatic timezone-detection reload
+        // in initTimezone() firing while the package modal is still open,
+        // or a week/date-range change) — same session ID, but the array
+        // holding it has since been swapped out, or the newly-loaded range
+        // no longer includes that specific session. Storing the full
+        // session snapshot at the moment of the click — when we already
+        // know for certain it exists, since the click came from a card
+        // built from the current sessionsData — removes that dependency
+        // completely; selectPackage() never needs to look anything up
+        // again afterward.
+        pendingSession: null,
         sessionsData: [],
         isLoading: false,
         visitorIp: '',
@@ -588,6 +604,11 @@
 
     /* ---- Session selection ---- */
     function isSessionSelected(id) {
+        // Also treat the not-yet-committed pending click (no package chosen
+        // yet) as "selected" so the "+" button reflects the click
+        // immediately, instead of looking unclicked while the package
+        // modal is open — see state.pendingSession above.
+        if (state.pendingSession && state.pendingSession.id === id) return true;
         return state.selectedSessions.some(function (s) { return s.id === id; });
     }
 
@@ -596,7 +617,16 @@
     } );
 
     function toggleSession(sessionId) {
-        if (!state.package) { state.pendingSessionId = sessionId; openPackageModal(); return; }
+        if (!state.package) {
+            var clicked = findSessionById(sessionId);
+            state.pendingSession = clicked ? {
+                id: clicked.id, title: clicked.title, class_name: clicked.class_name,
+                level: clicked.level, starts_at_gmt: clicked.starts_at_gmt, ends_at_gmt: clicked.ends_at_gmt
+            } : null;
+            renderCalendar();
+            openPackageModal();
+            return;
+        }
         var idx = state.selectedSessions.findIndex(function (s) { return s.id === sessionId; });
         if (idx >= 0) {
             state.selectedSessions.splice(idx, 1);
@@ -666,7 +696,10 @@
         // stale pending click surface later against an unrelated package.
         // selectPackage() already consumes and clears this before calling
         // closePackageModal() on the success path, so this is a no-op there.
-        state.pendingSessionId = null;
+        if (state.pendingSession) {
+            state.pendingSession = null;
+            renderCalendar();
+        }
     }
 
     function loadPackages() {
@@ -704,19 +737,15 @@
         state.selectedSessions = [];
 
         // Carry over the session the visitor clicked before this package
-        // modal was opened (see state.pendingSessionId above), so it doesn't
-        // have to be re-clicked. Still respects this package's own session
-        // count/type rules exactly like a normal toggleSession() click would.
-        if (state.pendingSessionId) {
-            var pending = findSessionById(state.pendingSessionId);
-            if (pending) {
-                state.selectedSessions.push({
-                    id: pending.id, title: pending.title, class_name: pending.class_name,
-                    level: pending.level, starts_at_gmt: pending.starts_at_gmt, ends_at_gmt: pending.ends_at_gmt
-                });
-            }
+        // modal was opened (see state.pendingSession above), so it doesn't
+        // have to be re-clicked. Uses the snapshot captured at click time
+        // directly — no re-lookup against state.sessionsData here, which is
+        // exactly what could silently fail if that array had been replaced
+        // in the meantime (see state.pendingSession's comment).
+        if (state.pendingSession) {
+            state.selectedSessions.push(state.pendingSession);
         }
-        state.pendingSessionId = null;
+        state.pendingSession = null;
 
         saveState();
         closePackageModal();
