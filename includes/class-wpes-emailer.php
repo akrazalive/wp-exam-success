@@ -226,6 +226,58 @@ class WPES_Emailer {
 	}
 
 	/**
+	 * Written confirmation to the teacher after a session they're
+	 * assigned to is confirmed — for documentation/compliance purposes
+	 * (backend counter-check item, 2026-09-13). Distinct from both
+	 * send_session_confirmed_to_attendees() above (attendee-facing) and
+	 * WPES_Meeting_Links::send_for_session() (the meeting-join link) —
+	 * this one exists specifically as a written record for the teacher,
+	 * CC'd to the admin notification address as the record copy.
+	 *
+	 * @param object $session
+	 * @param object|null $class
+	 * @param object $teacher
+	 * @return bool
+	 */
+	public static function send_session_confirmed_to_teacher( $session, $class, $teacher ) {
+		if ( empty( $teacher->email ) ) {
+			return false;
+		}
+
+		$class_name = $class ? $class->name : __( 'your class', 'wp-exam-success' );
+		$title      = $session->title ?: $class_name;
+		$start      = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y' );
+		$start_time = get_date_from_gmt( $session->starts_at_gmt, 'g:i A' );
+		$end_time   = get_date_from_gmt( $session->ends_at_gmt, 'g:i A' );
+		$tz_suffix  = ' (' . wp_timezone_string() . ')';
+		$when       = get_date_from_gmt( $session->starts_at_gmt, 'l, F j, Y \a\t g:i A' ) . $tz_suffix;
+
+		$tpl = WPES_Admin::get_email_templates()['teacher_session_confirmed'];
+
+		$tokens = array(
+			'{teacher_name}'       => esc_html( $teacher->name ),
+			'{class_name}'         => esc_html( $class_name ),
+			'{session_title}'      => esc_html( $title ),
+			'{session_date}'       => esc_html( $start ),
+			'{session_start_time}' => esc_html( $start_time . $tz_suffix ),
+			'{session_end_time}'   => esc_html( $end_time . $tz_suffix ),
+			'{session_level}'      => esc_html( $session->level ? $session->level : '—' ),
+			'{session_datetime}'   => esc_html( $when ),
+		);
+
+		$subject = strtr( $tpl['subject'], $tokens );
+		$body    = strtr( $tpl['body'], $tokens );
+
+		$headers  = array( 'Content-Type: text/html; charset=UTF-8' );
+		$admin_cc = self::get_admin_notification_email();
+		if ( $admin_cc ) {
+			$headers[] = 'Cc: ' . $admin_cc;
+		}
+
+		return wp_mail( $teacher->email, $subject, self::wrap_template( $body ), $headers );
+	}
+
+	/**
 	 * Sent to a customer whose booked session was cancelled for not
 	 * reaching the minimum participant count — informs them and points
 	 * at their replacement credit (Developer Spec §11).

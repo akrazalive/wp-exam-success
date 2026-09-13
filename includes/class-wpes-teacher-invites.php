@@ -376,6 +376,12 @@ class WPES_Teacher_Invites {
 
 		if ( $teacher ) {
 			WPES_Emailer::send_session_confirmed_to_attendees( $session, $class, $teacher );
+			// Backend counter-check item (2026-09-13): written confirmation
+			// to the teacher (CC admin) — previously missing entirely; the
+			// teacher only ever received the original Accept-Link
+			// invitation email, never anything confirming the assignment
+			// actually went through.
+			WPES_Emailer::send_session_confirmed_to_teacher( $session, $class, $teacher );
 		}
 
 		if ( ! empty( $session->meeting_link ) ) {

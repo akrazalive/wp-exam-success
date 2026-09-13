@@ -53,6 +53,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 					<th><?php esc_html_e( 'Meeting Link', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Teacher', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Status', 'wp-exam-success' ); ?></th>
+					<th><?php esc_html_e( 'Active', 'wp-exam-success' ); ?></th>
 					<th><?php esc_html_e( 'Actions', 'wp-exam-success' ); ?></th>
 				</tr>
 			</thead>

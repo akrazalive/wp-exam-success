@@ -2101,3 +2101,130 @@ OPEN ITEMS FOR THE CLIENT:
     client's explicit decision on whether to actually retry the
     payment capture.
 ------------------------------------------------------------
+
+------------------------------------------------------------
+DATE:      2026-09-13
+FILE(S):
+  - wp-exam-success.php                              (version bump 1.9.4 -> 1.10.0)
+  - includes/class-wpes-activator.php                 (modified — new column)
+  - includes/class-wpes-sessions.php                  (modified)
+  - includes/class-wpes-woocommerce.php                (modified)
+  - includes/class-wpes-emailer.php                   (modified)
+  - includes/class-wpes-teacher-invites.php            (modified)
+  - admin/class-wpes-admin.php                        (modified)
+  - admin/views/settings.php                          (modified)
+  - admin/views/sessions.php                          (modified)
+  - admin/js/wpes-admin.js                             (modified)
+
+CHANGE:
+  Client's final message before their Full Manual E2E Test listed 3
+  points. Investigated each rather than assuming either "already
+  fixed" (item 1) or "not required" (items 2/3):
+
+  1. Initial Session Selection, reported still not retained. Re-
+     verified the exact deployed logic (byte-diffed against local,
+     re-ran the real Node.js reproduction from the 2026-09-12 fix) —
+     the code itself is correct and unchanged. Investigating WHY a
+     correct fix could still look broken to a real visitor found a
+     separate, serious infrastructure issue: this staging site's
+     hosting platform (Hostinger) runs its own edge/CDN cache
+     ("hcdn") IN FRONT OF WordPress, entirely separate from the
+     LiteSpeed Cache plugin (confirmed disabled in its own settings —
+     "Enable Cache: OFF"). This edge cache was serving the booking
+     page up to ~5 days stale (Age header up to ~416,000 seconds
+     observed), with `Cache-Control: public, max-age=604800` (7 days)
+     on the page itself — meaning a visitor's OWN BROWSER could also
+     be reusing its own week-old cached copy of the page and its JS,
+     independent of anything this project deploys to the server.
+     LiteSpeed's own "Purge All" (tried repeatedly) has no effect on
+     this layer — it purges LiteSpeed's cache, which was already off;
+     the hcdn edge is Hostinger hosting-platform infrastructure,
+     configured and purged via hPanel, which this project has no
+     login for (only WP-admin + FTP were provided). This is very
+     likely why item 1 (and potentially other frontend-JS-dependent
+     fixes) kept appearing "still broken" on re-test regardless of
+     what was actually deployed. Flagged directly to the user in chat
+     for a decision — needs either hPanel access or the client/host
+     disabling or purging this edge cache; not something resolvable
+     from WP-admin or FTP alone.
+
+  2. Teacher Confirmation Email — genuinely missing, confirmed by
+     reading WPES_Emailer::send_session_confirmed_to_attendees(): it
+     only ever emailed attendees, never the teacher, and there was no
+     other "confirmation" email distinct from the meeting-link send.
+     Added a new WPES_Emailer::send_session_confirmed_to_teacher(),
+     called alongside the existing attendee email from
+     WPES_Teacher_Invites::finalize_session_confirmation() (both the
+     automatic Accept-Link path and manual admin assignment). CC's the
+     Settings > Admin Notification Email address (falling back to the
+     site admin email, same convention as the existing admin alerts).
+     Body includes class/course, date, start time, end time, and
+     level, exactly as requested — added as a new editable template
+     ("Session Confirmation Email (to teacher, CC admin)") under
+     Settings > Email & Message Templates, using the plugin's existing
+     token-substitution mechanism, so the body IS the "additional
+     custom text" the client asked to be able to edit — no separate
+     field was needed.
+
+  3. Session Activation/Deactivation — genuinely missing (searched
+     both spec PDFs and the existing codebase: sessions only ever had
+     a scheduled/cancelled `status`, no lighter-weight on/off switch).
+     Added a new `is_active` column (default 1, non-destructive dbDelta
+     migration) — distinct from `status`: deactivating a session only
+     stops it being offered for NEW frontend bookings; it does not
+     cancel the session, notify existing attendees, or touch
+     replacement-credit logic, since nothing about the session's own
+     outcome has changed. Added an "Active" column + Activate/
+     Deactivate button to the admin Sessions table, backed by a new
+     WPES_Sessions::set_active() and an AJAX handler. Wired the gate
+     into both the public booking calendar (get_calendar()) and the
+     checkout validation step (WPES_WooCommerce::validate_add_to_cart())
+     — deliberately NOT into admin manual enrollment, so an admin can
+     still enroll a specific customer into a deactivated session if
+     they choose to.
+
+REASON:
+  Client's final 3 points before their Full Manual E2E Test and
+  acceptance decision.
+
+VERIFIED:
+  - php -l and node --check clean on every touched file. All 10 files
+    uploaded via FTP and byte-diffed (SHA-256) clean against local.
+  - No fatal errors: front page, booking page, my-account, and both
+    admin Sessions and Settings screens all load clean after deploy.
+  - The is_active DB migration was confirmed live: re-fetched the
+    admin Sessions datatable immediately after deploy and every
+    existing session correctly shows "Active" (the column's DEFAULT 1
+    applied automatically to all pre-existing rows).
+  - Item 3 (activation) — live end-to-end: toggled a real scheduled
+    test session (#32) to inactive via the actual AJAX action, queried
+    the live public calendar endpoint and confirmed it disappeared;
+    toggled it back to active and confirmed it reappeared. Test data
+    left exactly as found afterward.
+  - Item 2 (teacher confirmation email) — live end-to-end: assigned a
+    teacher to a real test session (#42, "TESTX A3 — 5 Customers",
+    5 confirmed attendees, previously unassigned) via the actual admin
+    Edit-Session action, then read the real sent email directly from
+    the mail log: correct recipient (the assigned teacher), correct CC
+    header (the admin notification address), and a body containing
+    exactly the required class/course, date, start time, end time,
+    and level. Also confirmed the existing attendee-facing "session
+    confirmed" emails still fired normally alongside it (5 attendees +
+    1 teacher = 6 total emails, matching expectations, no regression).
+  - Item 1 — the caching root-cause finding is based on directly
+    observed response headers (Age, Cache-Control, platform/panel
+    headers, x-hcdn-cache-status: HIT) from repeated live requests,
+    not speculation; the underlying JS fix itself was already
+    re-verified via direct execution (see the 2026-09-12 entry).
+
+OPEN ITEMS FOR THE CLIENT:
+  - Item 1 needs a decision/action outside this project's access:
+    either hPanel credentials so this can be resolved directly, or the
+    client/host disabling or purging Hostinger's edge cache for the
+    booking page. Until then, any fresh code fix to public-facing JS
+    risks looking "still broken" on re-test through no fault of the
+    code itself.
+  - Order #1190 (items 1/2/3 from the 2026-09-11/12 rounds) still
+    needs the client's explicit decision on whether to actually retry
+    the payment capture.
+------------------------------------------------------------

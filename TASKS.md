@@ -2,7 +2,7 @@
 
 Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_Developer_Specification_EN_FINAL_v2.pdf` and `WP_Exam_Success_Booking_Workflow_Specification_Overview.pdf`), section by section, with the exact files touched for each part. Companion to `wp-exam-success/CHANGE_LOG.txt`, which has the full dated history (what/why/how verified) — this file is the "where do things stand" index.
 
-**Last updated:** 2026-09-12 (latest: final 2 remaining points, see below)
+**Last updated:** 2026-09-13 (latest: final 3 points before Full Manual E2E Test, see below)
 
 ## Legend
 
@@ -25,6 +25,18 @@ Tracks progress against the two client specs (`WP_Exam_Success_Booking_Workflow_
 | Replacement session / credit flow (§11, Overview red path) | ✅ |
 | Global Settings additions (§12) | ✅ |
 | Payment: pre-authorize → capture on first confirmed session (§6, §7 steps 3/12/13, Overview green-path step 5) | ✅ — verified live 2026-09-07 with a real WooPayments/Stripe test transaction (see below) |
+
+---
+
+## Final 3 points before Full Manual E2E Test (2026-09-13)
+
+Client's message before their Full Manual E2E Test and acceptance decision. Full detail in `CHANGE_LOG.txt`'s 2026-09-13 entry.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Initial session selection, still reported not retained | ⚠️ **Code re-confirmed correct; real root cause found elsewhere.** Re-verified the exact deployed JS is correct (byte-diff + re-ran the real reproduction test) — unchanged since the 2026-09-12 fix. Investigating further found Hostinger's own edge/CDN cache ("hcdn"), separate from the LiteSpeed Cache plugin (confirmed OFF), serving the booking page up to ~5 days stale with a 7-day browser cache-control header. This is outside WP-admin/FTP access — needs hPanel access or the client/host to disable or purge it. See chat for the two options. |
+| 2 | Teacher Confirmation Email (to teacher, CC admin, for compliance) | ✅ **Built and live-verified.** Genuinely missing — the existing "session confirmed" email only ever went to attendees. Added a new email, CC'd to the admin notification address, with class/course + date + start/end time + level, editable via Settings > Email & Message Templates like every other email. Verified live: assigned a teacher to a real test session and confirmed the actual sent email's recipient, CC header, and full body content directly in the mail log. |
+| 3 | Session Activation/Deactivation | ✅ **Built and live-verified.** Genuinely missing (not in either spec PDF or the existing codebase) — added a new `is_active` flag per session, distinct from cancellation: deactivating only stops new frontend bookings, doesn't cancel or notify anyone. New Active/Inactive column + toggle button on the admin Sessions table. Verified live: toggled a real session inactive, confirmed it vanished from the public booking calendar, toggled it back, confirmed it reappeared. |
 
 ---
 

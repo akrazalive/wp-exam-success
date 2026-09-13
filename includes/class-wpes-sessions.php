@@ -167,6 +167,32 @@ class WPES_Sessions {
 		return $wpdb->update( $table, $data, array( 'id' => $id ), $format, array( '%d' ) );
 	}
 
+	/**
+	 * Toggle a single session's frontend booking availability. Backend
+	 * review item (2026-09-13) — distinct from cancel()/status: this
+	 * only controls whether the session is offered for NEW bookings
+	 * (frontend calendar + checkout, see get_calendar() and
+	 * WPES_WooCommerce::validate_add_to_cart()). It does not cancel the
+	 * session, does not notify existing attendees, and does not touch
+	 * any existing booking or replacement-credit logic — a deactivated
+	 * session with attendees already booked still runs as planned;
+	 * deactivating just stops new customers from booking into it.
+	 *
+	 * @param int  $id     Session ID.
+	 * @param bool $active True to activate, false to deactivate.
+	 * @return bool
+	 */
+	public static function set_active( $id, $active ) {
+		global $wpdb;
+		return false !== $wpdb->update(
+			WPES_DB::sessions_table(),
+			array( 'is_active' => $active ? 1 : 0, 'updated_at' => WPES_DB::now_gmt() ),
+			array( 'id' => (int) $id ),
+			array( '%d', '%s' ),
+			array( '%d' )
+		);
+	}
+
 	/** Cancel every future, not-yet-started occurrence in a series (e.g. "cancel all remaining Mondays"). */
 	public static function cancel_series_future( $series_id ) {
 		global $wpdb;
@@ -304,6 +330,7 @@ class WPES_Sessions {
 			'starts_at_gmt' => 's.starts_at_gmt',
 			'teacher_name'  => 't.name',
 			'status'        => 's.status',
+			'is_active'     => 's.is_active',
 		);
 		$order_col = isset( $args['order_by'] ) && isset( $allowed[ $args['order_by'] ] ) ? $allowed[ $args['order_by'] ] : 's.starts_at_gmt';
 		$order_dir = ( isset( $args['order_dir'] ) && 'desc' === strtolower( $args['order_dir'] ) ) ? 'DESC' : 'ASC';
@@ -387,7 +414,11 @@ class WPES_Sessions {
 		$bookings  = WPES_DB::bookings_table();
 		$classes_t = $wpdb->prefix . 'wpes_classes';
 
-		$where = array( "s.status = 'scheduled'", "c.status = 'active'" );
+		// Backend review item (2026-09-13): individual session
+		// activation gate — an inactive session is simply not offered
+		// for new bookings on this public calendar feed (customers who
+		// already booked it are unaffected; see hydrate_row()'s docblock).
+		$where = array( "s.status = 'scheduled'", "c.status = 'active'", 's.is_active = 1' );
 		$prepare = array();
 
 		// Date range (UTC)
@@ -478,6 +509,16 @@ class WPES_Sessions {
 		$row->max_attendees  = (int) $row->max_attendees;
 		$row->starts_at_gmt  = $row->starts_at_gmt;
 		$row->ends_at_gmt    = $row->ends_at_gmt;
+		// Backend review item (2026-09-13): session-level activation,
+		// distinct from `status` (scheduled/cancelled). Deactivating a
+		// session only hides it from new frontend bookings — unlike
+		// cancelling, it does not notify existing customers or issue
+		// replacement credits, since nothing about the session's own
+		// outcome has changed; it's simply not offered for new bookings
+		// right now (e.g. temporarily paused while being edited, or a
+		// duplicate entry). Defaults to 1 (active) for any row created
+		// before this column existed.
+		$row->is_active      = isset( $row->is_active ) ? (int) $row->is_active : 1;
 		return $row;
 	}
 

@@ -278,7 +278,14 @@ class WPES_WooCommerce {
 		foreach ( $session_ids as $session_id ) {
 			$session = WPES_Sessions::get( $session_id );
 
-			if ( ! $session || 'scheduled' !== $session->status ) {
+			// Backend review item (2026-09-13): a deactivated session
+			// (WPES_Sessions::is_active = 0) is blocked here the same way
+			// a cancelled one already was — same customer-facing message,
+			// since from the customer's side "deactivated" and "no longer
+			// bookable" look identical. Admin-side manual enrollment
+			// deliberately does NOT go through this check, so an admin can
+			// still enroll into a deactivated session if they choose to.
+			if ( ! $session || 'scheduled' !== $session->status || empty( $session->is_active ) ) {
 				wc_add_notice(
 					__( 'One of the selected sessions is no longer available. Please review your selection.', 'wp-exam-success' ),
 					'error'

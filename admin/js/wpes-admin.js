@@ -705,6 +705,19 @@
 				} );
 		} );
 
+		$( document ).on( 'click', '.wpes-toggle-session-active', function () {
+			var $btn = $( this );
+			var willActivate = '0' === String( $btn.data( 'active' ) );
+			post( 'wpes_toggle_session_active', { id: $btn.data( 'id' ), active: willActivate ? 1 : 0 } ).done( function ( res ) {
+				if ( res.success ) {
+					notyf.success( WPES_Admin.i18n.saved );
+					if ( tables.sessions ) tables.sessions.ajax.reload( null, false );
+				} else {
+					notyf.error( WPES_Admin.i18n.error );
+				}
+			} );
+		} );
+
 		$( document ).on( 'click', '.wpes-view-attendees', function () {
 			var sessionId = $( this ).data( 'id' );
 			var $body = $( '#wpesAttendeesModalBody' );

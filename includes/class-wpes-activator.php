@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WPES_Activator {
 
-	const DB_VERSION = '1.8.0';
+	const DB_VERSION = '1.9.0';
 
 	public static function activate() {
 		self::create_tables();
@@ -86,6 +86,7 @@ class WPES_Activator {
 			assigned_teacher_id BIGINT UNSIGNED NULL,
 			teacher_assigned_at DATETIME NULL,
 			confirmation_state VARCHAR(20) NOT NULL DEFAULT 'pending',
+			is_active TINYINT(1) UNSIGNED NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
@@ -94,7 +95,8 @@ class WPES_Activator {
 			KEY starts_at_gmt (starts_at_gmt),
 			KEY status (status),
 			KEY assigned_teacher_id (assigned_teacher_id),
-			KEY confirmation_state (confirmation_state)
+			KEY confirmation_state (confirmation_state),
+			KEY is_active (is_active)
 		) {$charset_collate};";
 
 		$sql_bookings = "CREATE TABLE {$bookings_table} (

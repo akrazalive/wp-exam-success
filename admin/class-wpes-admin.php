@@ -28,6 +28,7 @@ class WPES_Admin {
 		add_action( 'wp_ajax_wpes_update_session', array( __CLASS__, 'ajax_update_session' ) );
 		add_action( 'wp_ajax_wpes_cancel_series', array( __CLASS__, 'ajax_cancel_series' ) );
 		add_action( 'wp_ajax_wpes_bulk_archive_sessions', array( __CLASS__, 'ajax_bulk_archive_sessions' ) );
+		add_action( 'wp_ajax_wpes_toggle_session_active', array( __CLASS__, 'ajax_toggle_session_active' ) );
 		add_action( 'wp_ajax_wpes_manual_enroll', array( __CLASS__, 'ajax_manual_enroll' ) );
 		add_action( 'wp_ajax_wpes_send_meeting_link', array( __CLASS__, 'ajax_send_meeting_link' ) );
 		add_action( 'wp_ajax_wpes_session_attendees', array( __CLASS__, 'ajax_session_attendees' ) );
@@ -353,6 +354,19 @@ class WPES_Admin {
 			'session_confirmed'             => array(
 				'subject' => __( 'Your session is confirmed — {session_title}', 'wp-exam-success' ),
 				'body'    => __( '<p>Hi {customer_name},</p><p>Good news — your session for {session_title} on {session_datetime} is confirmed, with {teacher_name} as your teacher.</p><p style="margin-top:24px;">{account_link}</p>', 'wp-exam-success' ),
+			),
+			// Backend counter-check item (2026-09-13): written confirmation
+			// to the teacher for documentation/compliance purposes — a
+			// separate concern from session_confirmed above (which is
+			// attendee-facing) and from the meeting-link email (which is
+			// just the join link). Always CC'd to the admin notification
+			// address (Settings > Admin Notification Email) as the record
+			// copy. The body here is exactly what the client asked to be
+			// able to customize — no separate "custom text" field is
+			// needed, this whole template already is that.
+			'teacher_session_confirmed'     => array(
+				'subject' => __( 'Session confirmation — {session_title}', 'wp-exam-success' ),
+				'body'    => __( '<p>Hi {teacher_name},</p><p>This confirms your assignment to the following session:</p><ul><li><strong>Class/Course:</strong> {class_name}</li><li><strong>Session:</strong> {session_title}</li><li><strong>Date:</strong> {session_date}</li><li><strong>Time:</strong> {session_start_time} – {session_end_time}</li><li><strong>Level:</strong> {session_level}</li></ul><p>Please keep this email for your records.</p>', 'wp-exam-success' ),
 			),
 			'session_cancelled_replacement' => array(
 				'subject' => __( 'Session cancelled — replacement available for {session_title}', 'wp-exam-success' ),
@@ -801,6 +815,22 @@ class WPES_Admin {
 		wp_send_json_success( array( 'affected' => WPES_Sessions::bulk_archive( $ids ) ) );
 	}
 
+	/**
+	 * Backend review item (2026-09-13): activate/deactivate a single
+	 * session — see WPES_Sessions::set_active()'s docblock for exactly
+	 * what this does and doesn't affect.
+	 */
+	public static function ajax_toggle_session_active() {
+		self::verify_request();
+		$id     = (int) ( $_POST['id'] ?? 0 );
+		$active = ! empty( $_POST['active'] );
+		if ( ! $id ) {
+			wp_send_json_error( array( 'message' => __( 'Missing session ID.', 'wp-exam-success' ) ) );
+		}
+		WPES_Sessions::set_active( $id, $active );
+		wp_send_json_success( array( 'is_active' => $active ) );
+	}
+
 	public static function ajax_manual_enroll() {
 		self::verify_request();
 		$session_id = (int) ( $_POST['session_id'] ?? 0 );
@@ -955,7 +985,7 @@ class WPES_Admin {
 		$page     = (int) floor( $start / $length ) + 1;
 
 		list( $order_by, $order_dir ) = self::get_datatable_order(
-			array( 0 => 'class_name', 1 => 'title', 2 => 'starts_at_gmt', 5 => 'teacher_name', 6 => 'status' ),
+			array( 0 => 'class_name', 1 => 'title', 2 => 'starts_at_gmt', 5 => 'teacher_name', 6 => 'status', 7 => 'is_active' ),
 			'starts_at_gmt'
 		);
 
@@ -991,6 +1021,13 @@ class WPES_Admin {
 				? esc_html( $session->teacher_name )
 				: '<span class="text-muted">' . esc_html__( 'Unassigned', 'wp-exam-success' ) . '</span>';
 
+			// Backend review item (2026-09-13): activation toggle, separate
+			// from the Status column above (scheduled/cancelled) — see
+			// WPES_Sessions::set_active()'s docblock for what this does.
+			$is_active    = ! empty( $session->is_active );
+			$active_html  = '<span class="badge bg-' . ( $is_active ? 'success' : 'secondary' ) . ' wpes-session-active-badge">' . ( $is_active ? esc_html__( 'Active', 'wp-exam-success' ) : esc_html__( 'Inactive', 'wp-exam-success' ) ) . '</span> ';
+			$active_html .= '<button type="button" class="btn btn-sm btn-outline-secondary wpes-toggle-session-active" data-id="' . esc_attr( $session->id ) . '" data-active="' . ( $is_active ? '1' : '0' ) . '">' . ( $is_active ? esc_html__( 'Deactivate', 'wp-exam-success' ) : esc_html__( 'Activate', 'wp-exam-success' ) ) . '</button>';
+
 			$data[] = array(
 				esc_html( $session->class_name ),
 				esc_html( $session->title ?: '—' ),
@@ -999,6 +1036,7 @@ class WPES_Admin {
 				$link_html,
 				$teacher_html,
 				'<span class="badge bg-' . ( 'scheduled' === $session->status ? 'success' : 'secondary' ) . '">' . esc_html( ucfirst( $session->status ) ) . '</span>',
+				$active_html,
 				$actions,
 			);
 		}

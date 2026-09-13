@@ -16,6 +16,10 @@ $email_items = array(
 		'label'  => __( 'Session Confirmed Email (to attendees)', 'wp-exam-success' ),
 		'tokens' => '{customer_name}, {session_title}, {session_datetime}, {teacher_name}, {account_link}',
 	),
+	'teacher_session_confirmed'     => array(
+		'label'  => __( 'Session Confirmation Email (to teacher, CC admin)', 'wp-exam-success' ),
+		'tokens' => '{teacher_name}, {class_name}, {session_title}, {session_date}, {session_start_time}, {session_end_time}, {session_level}, {session_datetime}',
+	),
 	'session_cancelled_replacement' => array(
 		'label'  => __( 'Session Cancelled / Replacement Credit Email', 'wp-exam-success' ),
 		'tokens' => '{customer_name}, {session_title}, {session_datetime}, {replacement_button}',
